@@ -1315,13 +1315,13 @@ export default function (view) {
             case ',':
                 if (!e.shiftKey) {
                     e.preventDefault();
-                    playbackManager.seekRelative(currentPlayer, 1);
+                    playbackManager.seekRelative(currentPlayer, -1);
                 }
                 break;
             case '.':
                 if (!e.shiftKey) {
                     e.preventDefault();
-                    playbackManager.seekRelative(currentPlayer, -1);
+                    playbackManager.seekRelative(currentPlayer, 1);
                 }
                 break;
             case 'j':
