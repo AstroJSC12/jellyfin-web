@@ -1280,8 +1280,7 @@ export default function (view) {
                     e.stopPropagation();
                 }
                 break;
-            case 'k':
-            case 'K':
+            case 'KeyK':
                 if (!e.shiftKey) {
                     e.preventDefault();
                     playbackManager.playPause(currentPlayer);
@@ -1302,8 +1301,7 @@ export default function (view) {
                     playbackManager.volumeDown(currentPlayer);
                 }
                 break;
-            case 'l':
-            case 'L':
+            case 'KeyL':
             case 'ArrowRight':
             case 'Right':
                 if (!e.shiftKey) {
@@ -1312,20 +1310,19 @@ export default function (view) {
                     showOsd(btnFastForward);
                 }
                 break;
-            case ',':
+            case 'Comma':
                 if (!e.shiftKey) {
                     e.preventDefault();
                     playbackManager.seekFrames(-1, currentPlayer);
                 }
                 break;
-            case '.':
+            case 'Period':
                 if (!e.shiftKey) {
                     e.preventDefault();
                     playbackManager.seekFrames(1, currentPlayer);
                 }
                 break;
-            case 'j':
-            case 'J':
+            case 'KeyJ':
             case 'ArrowLeft':
             case 'Left':
                 if (!e.shiftKey) {
@@ -1334,29 +1331,25 @@ export default function (view) {
                     showOsd(btnRewind);
                 }
                 break;
-            case 'f':
-            case 'F':
+            case 'KeyF':
                 if (!e.shiftKey) {
                     e.preventDefault();
                     playbackManager.toggleFullscreen(currentPlayer);
                 }
                 break;
-            case 'm':
-            case 'M':
+            case 'KeyM':
                 if (!e.shiftKey) {
                     e.preventDefault();
                     playbackManager.toggleMute(currentPlayer);
                 }
                 break;
-            case 'p':
-            case 'P':
+            case 'KeyP':
                 if (e.shiftKey) {
                     e.preventDefault();
                     playbackManager.previousTrack(currentPlayer);
                 }
                 break;
-            case 'n':
-            case 'N':
+            case 'KeyN':
                 if (e.shiftKey) {
                     e.preventDefault();
                     playbackManager.nextTrack(currentPlayer);
@@ -1392,26 +1385,26 @@ export default function (view) {
                     playbackManager.seekPercent(100, currentPlayer);
                 }
                 break;
-            case '0':
-            case '1':
-            case '2':
-            case '3':
-            case '4':
-            case '5':
-            case '6':
-            case '7':
-            case '8':
-            case '9': { // no Shift
+            case 'Digit0':
+            case 'Digit1':
+            case 'Digit2':
+            case 'Digit3':
+            case 'Digit4':
+            case 'Digit5':
+            case 'Digit6':
+            case 'Digit7':
+            case 'Digit8':
+            case 'Digit9': { // no Shift
                 e.preventDefault();
-                const percent = parseInt(key, 10) * 10;
+                const percent = parseInt(key.replace('Digit', ''), 10) * 10;
                 playbackManager.seekPercent(percent, currentPlayer);
                 break;
             }
-            case '>': // Shift+.
+            case 'Period': // Shift+.
                 e.preventDefault();
                 playbackManager.increasePlaybackRate(currentPlayer);
                 break;
-            case '<': // Shift+,
+            case 'Comma': // Shift+,
                 e.preventDefault();
                 playbackManager.decreasePlaybackRate(currentPlayer);
                 break;
@@ -1427,15 +1420,13 @@ export default function (view) {
                     playbackManager.previousChapter(currentPlayer);
                 }
                 break;
-            case 'g':
-            case 'G':
+            case 'KeyG':
                 if (!e.shiftKey) {
                     e.preventDefault();
                     subtitleSyncOverlay?.decrementOffset();
                 }
                 break;
-            case 'h':
-            case 'H':
+            case 'KeyH':
                 if (!e.shiftKey) {
                     e.preventDefault();
                     subtitleSyncOverlay?.incrementOffset();
