@@ -141,6 +141,7 @@ const FilterButton: FC<FilterButtonProps> = ({
             || viewType === LibraryTab.Videos
             || viewType === LibraryTab.Collections
             || viewType === LibraryTab.Playlists
+            || viewType === LibraryTab.Mixed
         );
     };
 
