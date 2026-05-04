@@ -2,7 +2,6 @@ import type { BaseItemKind } from '@jellyfin/sdk/lib/generated-client/models/bas
 import { CollectionType } from '@jellyfin/sdk/lib/generated-client/models/collection-type';
 import { ImageType } from '@jellyfin/sdk/lib/generated-client/models/image-type';
 import { ItemSortBy } from '@jellyfin/sdk/lib/generated-client/models/item-sort-by';
-import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
 import ButtonGroup from '@mui/material/ButtonGroup';
 import type { Theme } from '@mui/material/styles';
@@ -28,6 +27,8 @@ import { type LibraryViewSettings, type ParentId, ViewMode } from 'types/library
 import type { CardOptions } from 'types/cardOptions';
 import type { ListOptions } from 'types/listOptions';
 import { useItem } from 'hooks/useItem';
+
+import OffsetAppBar from '../OffsetAppBar';
 
 import AlphabetPicker from './AlphabetPicker';
 import FilterButton from './filter/FilterButton';
@@ -238,21 +239,18 @@ const ItemsView: FC<ItemsViewProps> = ({
 
     return (
         <Box className='padded-bottom-page'>
-            <AppBar
-                position='sticky'
-                elevation={0}
+            <OffsetAppBar
                 // eslint-disable-next-line react/jsx-no-bind
                 sx={theme => ({
-                    top: '3.25rem',
-                    backgroundColor: `var(--jf-palette-background-default, ${theme.palette.background.default}) !important`,
+                    top: 0,
+                    paddingTop: 6,
                     // This should render under the main AppBar and AlphabetPicker
                     zIndex: theme.zIndex.appBar - 2
                 })}
             >
                 <Toolbar
-                    variant='dense'
                     className={classNames(
-                        'padded-top padded-left padded-right',
+                        'padded-left padded-right',
                         { 'padded-right-withalphapicker': isAlphabetPickerEnabled }
                     )}
                     sx={{
@@ -387,7 +385,7 @@ const ItemsView: FC<ItemsViewProps> = ({
                         )}
                     </Box>
                 </Toolbar>
-            </AppBar>
+            </OffsetAppBar>
 
             {isAlphabetPickerEnabled && hasSortName && (
                 <AlphabetPicker
