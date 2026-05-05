@@ -1346,10 +1346,6 @@ export class PlaybackManager {
             }
         };
 
-        self.getFps = function (player) {
-            return self.currentMediaSource(player).MediaStreams.find(s => s.Type === 'Video')?.ReferenceFrameRate;
-        };
-
         function getSavedMaxStreamingBitrate(apiClient, mediaType) {
             if (!apiClient) {
                 // This should hopefully never happen
@@ -3889,17 +3885,16 @@ export class PlaybackManager {
         this.seekRelative(offsetTicks, player);
     }
 
-    nextFrame(player = this._currentPlayer) {
-        const fps = this.getFps(player);
-        if (fps) {
-            this.seekRelative(TICKS_PER_SECOND / fps, player);
-        }
-    }
+    seekFrames(frames = 1, player = this._currentPlayer) {
+        // Only allow seeking by frames when paused
+        if (!player.paused()) return;
 
-    previousFrame(player = this._currentPlayer) {
-        const fps = this.getFps(player);
-        if (fps) {
-            this.seekRelative(-TICKS_PER_SECOND / fps, player);
+        const source = this.currentMediaSource(player);
+        const videoStream = source?.MediaStreams?.find(s => s.Type === MediaType.Video);
+        // It only makes sense to seek video streams by frames
+        if (videoStream) {
+            const fps = videoStream.ReferenceFrameRate || 24;
+            this.seekRelative(frames / fps * TICKS_PER_SECOND, player);
         }
     }
 

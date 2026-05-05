@@ -1315,13 +1315,13 @@ export default function (view) {
             case ',':
                 if (!e.shiftKey) {
                     e.preventDefault();
-                    playbackManager.previousFrame(currentPlayer);
+                    playbackManager.seekFrames(-1, currentPlayer);
                 }
                 break;
             case '.':
                 if (!e.shiftKey) {
                     e.preventDefault();
-                    playbackManager.nextFrame(currentPlayer);
+                    playbackManager.seekFrames(1, currentPlayer);
                 }
                 break;
             case 'j':
@@ -2084,4 +2084,3 @@ export default function (view) {
         });
     }
 }
-
