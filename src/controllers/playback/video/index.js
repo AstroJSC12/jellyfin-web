@@ -1268,6 +1268,14 @@ export default function (view) {
             return;
         }
 
+        if (key.startsWith('Digit') || key.startsWith('Numpad')) {
+            const num = parseInt(key.replace('Digit', '').replace('Numpad', ''), 10);
+            if (!isNaN(num) && num >= 0 && num <= 9) {
+                playbackManager.seekPercent(num * 10, currentPlayer);
+                return;
+            }
+        }
+
         switch (key) {
             case 'Enter':
                 showOsd();
@@ -1311,15 +1319,19 @@ export default function (view) {
                 }
                 break;
             case 'Comma':
+                e.preventDefault();
                 if (!e.shiftKey) {
-                    e.preventDefault();
                     playbackManager.seekFrames(-1, currentPlayer);
+                } else {
+                    playbackManager.decreasePlaybackRate(currentPlayer);
                 }
                 break;
             case 'Period':
+                e.preventDefault();
                 if (!e.shiftKey) {
-                    e.preventDefault();
                     playbackManager.seekFrames(1, currentPlayer);
+                } else {
+                    playbackManager.increasePlaybackRate(currentPlayer);
                 }
                 break;
             case 'KeyJ':
@@ -1384,29 +1396,6 @@ export default function (view) {
                     e.preventDefault();
                     playbackManager.seekPercent(100, currentPlayer);
                 }
-                break;
-            case 'Digit0':
-            case 'Digit1':
-            case 'Digit2':
-            case 'Digit3':
-            case 'Digit4':
-            case 'Digit5':
-            case 'Digit6':
-            case 'Digit7':
-            case 'Digit8':
-            case 'Digit9': { // no Shift
-                e.preventDefault();
-                const percent = parseInt(key.replace('Digit', ''), 10) * 10;
-                playbackManager.seekPercent(percent, currentPlayer);
-                break;
-            }
-            case 'Period': // Shift+.
-                e.preventDefault();
-                playbackManager.increasePlaybackRate(currentPlayer);
-                break;
-            case 'Comma': // Shift+,
-                e.preventDefault();
-                playbackManager.decreasePlaybackRate(currentPlayer);
                 break;
             case 'PageUp':
                 if (!e.shiftKey) {
