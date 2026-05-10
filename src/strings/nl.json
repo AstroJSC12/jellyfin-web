@@ -133,7 +133,7 @@
     "Disconnect": "Loskoppelen",
     "Display": "Weergave",
     "DisplayInMyMedia": "Op het startscherm weergeven",
-    "DisplayInOtherHomeScreenSections": "In secties van het startscherm weergeven, zoals 'Onlangs toegevoegde media' en 'Verder kijken'",
+    "DisplayInOtherHomeScreenSections": "In secties van het startscherm weergeven, zoals 'Onlangs toegevoegde media' en 'Verderkijken'",
     "DisplayMissingEpisodesWithinSeasons": "Ontbrekende afleveringen weergeven binnen seizoen",
     "DisplayMissingEpisodesWithinSeasonsHelp": "Dit moet ook worden ingeschakeld voor tv-bibliotheken in de serverconfiguratie.",
     "DisplayModeHelp": "Selecteer het schermtype waar Jellyfin op draait.",
