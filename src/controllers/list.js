@@ -315,7 +315,7 @@ function getItems(instance, params, item, sortBy, startIndex, limit) {
         } else if (item.CollectionType === CollectionType.Tvshows) {
             query.IncludeItemTypes = 'Series';
         } else if (item.Type === 'Genre') {
-            query.IncludeItemTypes = 'Audiobook,Book,Movie,Series,Video';
+            query.IncludeItemTypes = 'Audiobook,Book,BoxSet,Movie,Series,Video';
         } else if (item.Type === 'Person') {
             query.IncludeItemTypes = params.type;
         }
