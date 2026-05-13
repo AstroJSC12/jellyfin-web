@@ -147,7 +147,7 @@ const detectBitrateInternal = (api: Api, tests: BitrateTest[], index: number, cu
     return getDownloadSpeed(api, test.bytes).then(
         (bitrate) => {
             if (bitrate < test.threshold) {
-                return Promise.resolve(normalizeReturnBitrate(bitrate));
+                return normalizeReturnBitrate(bitrate);
             } else {
                 return detectBitrateInternal(api, tests, index + 1, bitrate);
             }
