@@ -142,11 +142,50 @@ export const getFiltersQuery = (
     };
 };
 
+// =====BEGIN HOMELAB IMDB SORT=====
+// Views where we default-sort by IMDb rating descending instead of
+// the upstream "Name ascending." Tracks Jeff's stated preference
+// (mirrors Infuse's "Sort by Rating" behavior on iOS) and surfaces
+// the highest-rated content without the user having to discover the
+// sort menu.
+//
+// CommunityRating is the Jellyfin field name; OMDb plugin populates
+// it with IMDb's 0–10 score. Verified populating correctly on Jeff's
+// Jellyfin as of 2026-05-10. See ROADMAP.md Symptom B for the
+// server-side audit trail.
+//
+// Keeping this list short and movie/show-flavored on purpose; music,
+// photos, books etc. keep the upstream alphabetical default since
+// their rating fields are mostly empty.
+const HOMELAB_IMDB_SORT_VIEWS = new Set<LibraryTab>([
+    LibraryTab.Movies,
+    LibraryTab.Series,
+    LibraryTab.Favorites,
+    LibraryTab.Collections,
+    LibraryTab.Mixed
+]);
+// =====END HOMELAB IMDB SORT=====
+
 export const getSettingsKey = (viewType: LibraryTab, parentId: ParentId) => {
-    return `${viewType} - ${parentId}`;
+    // =====BEGIN HOMELAB IMDB SORT=====
+    // Bumped suffix from upstream "${viewType} - ${parentId}" so that
+    // existing localStorage entries (which were seeded with the old
+    // SortName/Ascending defaults before this fork shipped IMDb sort)
+    // are ignored on first load. Without this bump, Jeff's iPhone PWA
+    // would silently keep the stale settings and never see the new
+    // default. Each minor bump invalidates one round of cached prefs;
+    // OK because users can re-apply any custom sort they had set.
+    return `${viewType} - ${parentId} - homelab.v1`;
+    // =====END HOMELAB IMDB SORT=====
 };
 
 export const getDefaultSortBy = (viewType: LibraryTab) => {
+    // =====BEGIN HOMELAB IMDB SORT=====
+    if (HOMELAB_IMDB_SORT_VIEWS.has(viewType)) {
+        return ItemSortBy.CommunityRating;
+    }
+    // =====END HOMELAB IMDB SORT=====
+
     if (viewType === LibraryTab.Episodes) {
         return ItemSortBy.SeriesSortName;
     }
@@ -162,7 +201,12 @@ export const getDefaultLibraryViewSettings = (viewType: LibraryTab): LibraryView
         ImageType: viewType === LibraryTab.Networks ? ImageType.Thumb : ImageType.Primary,
         CardLayout: false,
         SortBy: getDefaultSortBy(viewType),
-        SortOrder: SortOrder.Ascending,
+        // =====BEGIN HOMELAB IMDB SORT=====
+        // Highest IMDb rating first when this view defaults to
+        // CommunityRating; everything else stays Ascending per
+        // upstream.
+        SortOrder: HOMELAB_IMDB_SORT_VIEWS.has(viewType) ? SortOrder.Descending : SortOrder.Ascending,
+        // =====END HOMELAB IMDB SORT=====
         StartIndex: 0
     };
 };

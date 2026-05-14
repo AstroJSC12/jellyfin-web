@@ -80,6 +80,61 @@ surgical. `git log --grep="HOMELAB"` finds the commit history.
   to "Media (Homelab)" / short_name "Media". So the home-screen
   install on iPhone/iPad/Mac doesn't say "Jellyfin."
 
+## Feature: IMDb-rating sort default (2026-05-14)
+
+Surgical UX patch added after Jeff observed Infuse's "Sort by
+Rating" is a daily-use feature he wanted carried over. Two edits
++ a new test file, all wrapped in `=====BEGIN HOMELAB IMDB SORT=====`
+markers so the diff stays visible during rebases.
+
+- **`src/strings/en-us.json`** — two label rename only. Stock
+  Jellyfin labels both the header field and the sort menu option
+  as "Community Rating," but in this deployment the OMDb plugin
+  populates that field with IMDb's 0–10 score. Renamed to
+  "IMDb rating" / "IMDb Rating" so the sort menu is findable
+  and the item-detail rating row reads correctly. Keys touched:
+  `CommunityRating` (line 179), `OptionCommunityRating`
+  (line 1308). Other languages keep the upstream label; only
+  `en-us` is exercised in this deployment.
+
+- **`src/utils/items.ts`** — three marker blocks. Introduces a
+  `HOMELAB_IMDB_SORT_VIEWS` set ({Movies, Series, Favorites,
+  Collections, Mixed}) and threads it through
+  `getDefaultSortBy()` and `getDefaultLibraryViewSettings()` so
+  those views default to `CommunityRating, Descending` instead
+  of `SortName, Ascending`. Also bumps the `getSettingsKey()`
+  return value with a `- homelab.v1` suffix so existing PWA
+  installs ignore their stale upstream-default cached
+  preferences on first load after this ships. Other views
+  (Episodes, Songs, Albums, etc.) keep upstream defaults
+  untouched.
+
+- **`src/utils/items.homelab.test.ts`** — new fork-only file.
+  21 Vitest tests locking in the IMDb-sort view set, the
+  paired Descending order, the upstream-untouched views, and
+  the `homelab.v1` storage-key suffix. Mocks
+  `scripts/settings/userSettings` and `components/layoutManager`
+  out so the test can run without booting apphost/globalize
+  in jsdom. If upstream renames a `LibraryTab` enum, expands
+  `getDefaultSortBy`, or changes the storage-key shape, these
+  fail loudly during rebase.
+
+**Why this is safe-ish across rebases:** the marker blocks are
+inside three small, focused functions; upstream rarely touches
+them (last meaningful change was ~2024). If `getDefaultSortBy`
+grows a third special case upstream, the merge conflict will
+be small and obvious — keep both branches' special cases and
+re-order so HOMELAB_IMDB_SORT_VIEWS is checked first.
+
+**Why the storage-key bump matters:** without it, a returning
+user (e.g. Jeff after the v1 ship on 2026-05-14) would have
+`{viewType: 'movies', parentId: 'xyz'}: {SortBy: SortName,
+SortOrder: Ascending}` already in localStorage from their first
+visit. `useLocalStorage` short-circuits past the new defaults
+and the change would be invisible. Bumping the key invalidates
+one round of cached prefs per minor version. Users with
+intentional custom sorts will re-set them once.
+
 ## Why `rfc3986Encode` (not `encodeURIComponent`)
 
 `make-infuse-url.sh` uses `jq @uri` which encodes every char
