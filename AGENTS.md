@@ -67,6 +67,16 @@ Key cross-repo references (all absolute paths):
   ```bash
   PATH="/opt/homebrew/opt/node@24/bin:$PATH" npm <command>
   ```
+- **Never build this fork's production image on the NAS.**
+  Webpack production peaks at 2–4 GB of RAM across ~1700 npm
+  packages. Tried on 2026-05-14; the NAS OOM-killed itself off
+  the tailnet, lost SSH, needed a physical power-cycle. Always
+  build on the Mac, then ship the prebuilt image. Full procedure
+  in `~/Projects/homelab/compose/jellyfin-web-custom/README.md`
+  under "Deploying from the Mac (canonical path)." Critical flag
+  on the NAS side: `docker compose up -d --no-build` so the
+  `build:` block in `docker-compose.yml` (kept for reference)
+  doesn't fire.
 
 ## Workflow norms
 

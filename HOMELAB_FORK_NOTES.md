@@ -7,6 +7,26 @@ playback to Infuse via its `x-callback-url/play` deep-link
 scheme with a scene-style `filename=` hint. Everything else is
 stock upstream — same browse, search, settings, library views.
 
+> ## ⚠️ HARD RULE: never build this fork on the NAS
+>
+> The production webpack build (`npm run build:production`, or
+> `docker compose --build` from `compose/jellyfin-web-custom/`)
+> peaks at 2–4 GB of RAM and runs across ~1700 packages. Jeff's
+> Synology NAS does **not** have the headroom while also serving
+> Jellyfin, Plex, Command Center, and DSM. Running it on the NAS
+> on 2026-05-14 OOM-killed the box hard enough that it lost
+> Tailscale, dropped SSH, and needed a physical power-cycle.
+>
+> **Always build on the Mac (M3 Pro, ~80s), then ship the prebuilt
+> image to the NAS.** Exact commands live in
+> `~/Projects/homelab/compose/jellyfin-web-custom/README.md`
+> under "Deploying from the Mac (canonical path)."
+>
+> The `Dockerfile` and `docker-compose.yml` still contain a
+> `build:` block for documentation purposes — but it must not be
+> exercised against the NAS Docker daemon. Always use
+> `docker compose up -d --no-build` on the NAS.
+
 Companion docs in the homelab repo (`~/Projects/homelab`):
 
 - `docs/MEDIA_UI_SPEC.md` — the full spec, scope, and rationale.
