@@ -1,8 +1,8 @@
 {
-    "name": "Jellyfin",
-    "description": "The Free Software Media System",
+    "name": "Media (Homelab)",
+    "description": "Jeff's media library — Jellyfin browse, Infuse playback",
     "lang": "en-US",
-    "short_name": "Jellyfin",
+    "short_name": "Media",
     "start_url": "index.html#/home",
     "theme_color": "#101010",
     "background_color": "#101010",
