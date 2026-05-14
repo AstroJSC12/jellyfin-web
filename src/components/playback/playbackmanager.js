@@ -2085,6 +2085,77 @@ export class PlaybackManager {
         self.translateItemsForPlayback = translateItemsForPlayback;
         self.getItemsForPlayback = getItemsForPlayback;
 
+        // =====BEGIN HOMELAB INFUSE HANDOFF=====
+        // Build an infuse://x-callback-url/play URL for the first video
+        // item the user is trying to play. Returns null if the item
+        // can't / shouldn't be handed off (audio, unknown type, missing
+        // metadata, etc.) so the caller can fall back to the in-browser
+        // player. See docs/INFUSE_URL_SCHEME.md in the homelab repo.
+        async function tryBuildInfuseUrl(options) {
+            try {
+                // Resolve the first item from options. Prefer pre-fetched
+                // items; fall back to fetching by id when only ids were
+                // passed (the "click Play on a card" case typically passes
+                // ids only).
+                let item;
+                if (options.items?.length) {
+                    item = options.items[0];
+                } else if (options.ids?.length && options.serverId) {
+                    const fetched = (await getItemsForPlayback(options.serverId, {
+                        Ids: options.ids[0]
+                    }))?.Items;
+                    item = fetched?.[0];
+                }
+                if (!item) return null;
+
+                // Only hijack video playback. Audio, channels, etc. keep
+                // using whatever the in-browser flow does today.
+                if (item.MediaType !== MediaType.Video) return null;
+
+                // Build the scene-style filename hint. Infuse uses this
+                // for TMDB metadata lookup, which is what AirPlay Now
+                // Playing renders on the TV. No zero-padding required.
+                let filename;
+                if (item.Type === BaseItemKind.Episode
+                        && item.SeriesName
+                        && item.ParentIndexNumber != null
+                        && item.IndexNumber != null) {
+                    filename = `${item.SeriesName}.S${item.ParentIndexNumber}E${item.IndexNumber}.${item.Name}.mp4`;
+                } else if (item.Type === BaseItemKind.Movie) {
+                    filename = item.ProductionYear ?
+                        `${item.Name}.${item.ProductionYear}.mp4` :
+                        `${item.Name}.mp4`;
+                } else {
+                    // Trailer, MusicVideo, Video, etc. — no scene-style
+                    // convention defined yet. Fall through to in-browser
+                    // player rather than guess.
+                    return null;
+                }
+
+                // Direct-stream URL. static=true tells Jellyfin to serve
+                // the original file with no transcoding — Infuse direct-
+                // plays whatever the bytes are.
+                const apiClient = ServerConnections.getApiClient(item.ServerId);
+                const serverUrl = apiClient.serverAddress();
+                const accessToken = apiClient.accessToken();
+                if (!serverUrl || !accessToken) return null;
+
+                const streamUrl =
+                    `${serverUrl}/Videos/${item.Id}/stream`
+                    + '?static=true'
+                    + `&api_key=${encodeURIComponent(accessToken)}`
+                    + `&MediaSourceId=${item.Id}`;
+
+                return 'infuse://x-callback-url/play'
+                    + `?url=${encodeURIComponent(streamUrl)}`
+                    + `&filename=${encodeURIComponent(filename)}`;
+            } catch (err) {
+                console.warn('[infuse handoff] failed to build URL; falling back to in-browser player:', err);
+                return null;
+            }
+        }
+        // =====END HOMELAB INFUSE HANDOFF=====
+
         self.play = async function (options) {
             normalizePlayOptions(options);
 
@@ -2097,6 +2168,24 @@ export class PlaybackManager {
                     return self._currentPlayer.play(options);
                 }
             }
+
+            // =====BEGIN HOMELAB INFUSE HANDOFF=====
+            // If the external-player setting is on (default true in our
+            // fork), route video playback to Infuse via its documented
+            // x-callback-url/play scheme with a scene-style filename=
+            // hint — avoids the AirPlay "Stream" TMDB metadata bug. See
+            // docs/INFUSE_URL_SCHEME.md in the homelab repo for the URL
+            // shape, the conventions, and why the naive form is wrong.
+            // Audio and unsupported item types fall through to the
+            // in-browser player.
+            if (appSettings.enableSystemExternalPlayers()) {
+                const infuseUrl = await tryBuildInfuseUrl(options);
+                if (infuseUrl) {
+                    window.location.href = infuseUrl;
+                    return;
+                }
+            }
+            // =====END HOMELAB INFUSE HANDOFF=====
 
             if (options.fullscreen) {
                 loading.show();

@@ -50,7 +50,14 @@ class AppSettings {
             this.set('enableSystemExternalPlayers', val.toString());
         }
 
-        return toBoolean(this.get('enableSystemExternalPlayers'), false);
+        // =====HOMELAB INFUSE HANDOFF=====
+        // Default flipped from false → true. With our fork, "system
+        // external player" means Infuse, and that's the whole point of
+        // the build. Users can still toggle it off in Settings → Playback
+        // → "Enable external video player" if they want the in-browser
+        // player back for some reason. See playbackmanager.js for the
+        // actual dispatch logic.
+        return toBoolean(this.get('enableSystemExternalPlayers'), true);
     }
 
     enableAutomaticBitrateDetection(isInNetwork, mediaType, val) {

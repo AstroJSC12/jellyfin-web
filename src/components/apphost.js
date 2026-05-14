@@ -272,6 +272,14 @@ const supportedFeatures = function () {
     features.push(AppFeature.TargetBlank);
     features.push(AppFeature.Screensaver);
 
+    // =====BEGIN HOMELAB INFUSE HANDOFF=====
+    // Advertise external-player support so the Settings UI surfaces the
+    // toggle. The actual dispatch is implemented in playbackmanager.js
+    // (search for "HOMELAB INFUSE HANDOFF"). See docs/INFUSE_URL_SCHEME.md
+    // in the homelab repo for the URL shape and rationale.
+    features.push(AppFeature.ExternalPlayerIntent);
+    // =====END HOMELAB INFUSE HANDOFF=====
+
     webSettings.getMultiServer().then(enabled => {
         if (enabled) features.push(AppFeature.MultiServer);
     });
