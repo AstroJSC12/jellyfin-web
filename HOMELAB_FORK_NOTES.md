@@ -185,17 +185,38 @@ plugin, a userscript, a sidecar service).
   11 new ones in `src/components/playback/infuseUrl.test.js`
   that lock in byte-identical output against `make-infuse-url.sh`
   for movie + episode fixtures (apostrophe case included).
-- **Dev server boots clean** — `npm start` smoke-tested: serves
+- **Dev server boots clean** — `npm start` serves
   `<title>Media</title>`, manifest name `"Media (Homelab)"`, and
   the Infuse handoff string is present in the live dev bundle.
-  **Click-Play not yet exercised** — needs Jeff to log into
-  the dev server interactively and click Play on a real item.
+- **End-to-end verified on real hardware (2026-05-14):**
+  - `make-infuse-url.sh` output played in Infuse on Mac. ✓
+  - Same URL tap-tested on iPhone — Infuse opened and played,
+    AirPlay Now Playing showed real episode metadata (not
+    "Stream"). ✓
+  - Fork dev server click-Play exercised: logged into Jellyfin
+    via the Tailscale hostname, clicked Play on an item,
+    Safari dispatched to `infuse://` URL, Infuse played. ✓
 - **Not yet deployed.** Compose service scaffolded at
   `homelab/compose/jellyfin-web-custom/` but not yet built or
-  run on the NAS.
-- **iPhone AirPlay metadata not yet verified.** Will happen
-  once `scripts/make-infuse-url.sh --copy "..."` is tap-tested
-  on the actual hardware. Same URL convention either way.
+  run on the NAS. All blockers cleared; ready when you are.
+
+## Gotcha: use the Tailscale hostname, not the LAN IP
+
+When the Mac is off-LAN (coffee shop, hotspot, etc.), connecting
+to Jellyfin at `http://192.168.1.151:8096` times out — that IP
+isn't reachable from outside the house. Use the Tailscale
+hostname instead:
+
+```
+http://jeff-nas.taild6c575.ts.net:8096
+```
+
+This works from anywhere Tailscale is connected — same Mac on
+LAN, off-LAN, iPhone on cellular, etc. The fork's web client
+stores whatever URL you enter at first-login in localStorage,
+so prefer the Tailscale hostname for consistency across
+networks. Same goes for the deployed PWA at
+`http://jeff-nas.taild6c575.ts.net:8097`.
 
 ## Branch / commit hygiene
 
