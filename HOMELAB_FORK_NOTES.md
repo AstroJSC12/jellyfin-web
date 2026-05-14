@@ -19,7 +19,7 @@ Companion docs in the homelab repo (`~/Projects/homelab`):
 - `compose/jellyfin-web-custom/` — deployment scaffold (nginx
   serving the built `dist/`, port 8097, not yet deployed).
 
-## What was changed (3 files + 1 PWA polish)
+## What was changed (3 upstream files + 2 new fork-only files + PWA polish)
 
 All edits marked with `=====BEGIN HOMELAB INFUSE HANDOFF=====`
 / `=====END HOMELAB INFUSE HANDOFF=====` comments so future
@@ -35,27 +35,45 @@ surgical. `git log --grep="HOMELAB"` finds the commit history.
   to `true`. The toggle still works either direction; the
   default just matches the fork's purpose.
 - **`src/components/playback/playbackmanager.js`** —
-  - New helper `tryBuildInfuseUrl(options)` builds the
-    `infuse://x-callback-url/play?url=…&filename=…` URL for the
-    first video item the user is trying to play. Returns null
-    for audio, unknown types, or when metadata is missing.
+  - Imports `buildInfuseUrl` from the new sibling module (see
+    below).
+  - `tryBuildInfuseUrl(options)` resolves the first item from
+    the play() options bag (handles both pre-fetched items and
+    id-only paths) and delegates to `buildInfuseUrl` for the
+    URL synthesis.
   - `self.play()` checks the setting at the top of the function;
     if on and the helper returns a URL, navigate to it and
-    return. Audio and unsupported types fall through to upstream
-    behavior.
+    return. Audio, unknown types, and missing-context items
+    fall through to upstream behavior.
+- **`src/components/playback/infuseUrl.js`** — new fork-only
+  file. Pure URL builder (`buildInfuseUrl`, `buildInfuseFilename`,
+  `rfc3986Encode`). Lives in its own module so it can be unit-
+  tested in isolation, and so the URL contract is in a file
+  upstream never touches → zero rebase risk for the meat of the
+  feature.
+- **`src/components/playback/infuseUrl.test.js`** — new fork-
+  only file. Vitest regression tests locking in the URL shape
+  byte-for-byte against `make-infuse-url.sh`. Includes an
+  apostrophe fixture (`Bob's Burgers`) to catch the canonical
+  divergence between `encodeURIComponent` and `jq @uri`.
 - **`src/manifest.json` + `src/index.html`** — PWA name flipped
   to "Media (Homelab)" / short_name "Media". So the home-screen
   install on iPhone/iPad/Mac doesn't say "Jellyfin."
 
-The full diff is small:
+## Why `rfc3986Encode` (not `encodeURIComponent`)
 
-```
-src/components/apphost.js                  |  8 +++
-src/components/playback/playbackmanager.js | 89 +++++++++++++++++++++
-src/manifest.json                          |  6 +-
-src/scripts/settings/appSettings.js        |  9 ++-
-src/index.html                             |  4 +-
-```
+`make-infuse-url.sh` uses `jq @uri` which encodes every char
+outside RFC 3986 unreserved [A-Za-z0-9-._~]. JavaScript's
+`encodeURIComponent` leaves `! * ' ( )` un-encoded. For most
+items this doesn't matter (TMDB-decodes either form to the same
+string), but for any title with an apostrophe the URLs differ
+byte-for-byte — violating the "Play button produces identical
+URL to the reference shell" hard rule.
+
+`rfc3986Encode` is a one-line fix: run `encodeURIComponent`,
+then percent-encode the five chars it leaves behind. The unit
+test in `infuseUrl.test.js` locks this in with a `Bob's
+Burgers` fixture.
 
 ## URL shape produced by the Play button
 
@@ -159,13 +177,19 @@ plugin, a userscript, a sidecar service).
 - **Build verified** end-to-end (`npm run build:production` =
   clean exit, 2 pre-existing bundle-size warnings unrelated to
   the patch).
-- **Lint clean** on all three patched files (1 pre-existing
-  warning on `playbackmanager.js:2667` unrelated to us).
+- **Lint clean** on all patched files (1 pre-existing warning
+  on `playbackmanager.js:~2635` unrelated to us — a `// FIXME`
+  comment upstream).
 - **`build:check` (tsc --noEmit)** clean.
-- **Dev loop not yet exercised end-to-end** — `npm start` not
-  run yet because that needs interactive login + click-Play to
-  validate. Next session: Jeff runs `npm start`, logs in,
-  clicks Play, confirms Safari navigates to `infuse://...`.
+- **Unit tests green** — `npm test` passes 178 tests including
+  11 new ones in `src/components/playback/infuseUrl.test.js`
+  that lock in byte-identical output against `make-infuse-url.sh`
+  for movie + episode fixtures (apostrophe case included).
+- **Dev server boots clean** — `npm start` smoke-tested: serves
+  `<title>Media</title>`, manifest name `"Media (Homelab)"`, and
+  the Infuse handoff string is present in the live dev bundle.
+  **Click-Play not yet exercised** — needs Jeff to log into
+  the dev server interactively and click Play on a real item.
 - **Not yet deployed.** Compose service scaffolded at
   `homelab/compose/jellyfin-web-custom/` but not yet built or
   run on the NAS.

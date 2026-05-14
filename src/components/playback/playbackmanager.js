@@ -13,6 +13,9 @@ import appSettings from '../../scripts/settings/appSettings';
 import itemHelper from '../itemHelper';
 import { pluginManager } from '../pluginManager';
 import PlayQueueManager from './playqueuemanager';
+// =====BEGIN HOMELAB INFUSE HANDOFF=====
+import { buildInfuseUrl } from './infuseUrl';
+// =====END HOMELAB INFUSE HANDOFF=====
 import * as userSettings from '../../scripts/settings/userSettings';
 import globalize from '../../lib/globalize';
 import loading from '../loading/loading';
@@ -2086,17 +2089,18 @@ export class PlaybackManager {
         self.getItemsForPlayback = getItemsForPlayback;
 
         // =====BEGIN HOMELAB INFUSE HANDOFF=====
-        // Build an infuse://x-callback-url/play URL for the first video
-        // item the user is trying to play. Returns null if the item
-        // can't / shouldn't be handed off (audio, unknown type, missing
-        // metadata, etc.) so the caller can fall back to the in-browser
-        // player. See docs/INFUSE_URL_SCHEME.md in the homelab repo.
+        // Resolve the first video item from a play() options bag and
+        // hand it to the pure URL builder in ./infuseUrl.js. Returns
+        // null when the item can't / shouldn't be handed off (audio,
+        // unknown type, missing metadata, no server context) so the
+        // caller falls back to the in-browser player.
+        // See docs/INFUSE_URL_SCHEME.md in the homelab repo.
         async function tryBuildInfuseUrl(options) {
             try {
-                // Resolve the first item from options. Prefer pre-fetched
-                // items; fall back to fetching by id when only ids were
-                // passed (the "click Play on a card" case typically passes
-                // ids only).
+                // Resolve the first item. Prefer pre-fetched items;
+                // fall back to fetching by id when only ids were
+                // passed (the "click Play on a card" path typically
+                // passes ids only).
                 let item;
                 if (options.items?.length) {
                     item = options.items[0];
@@ -2108,47 +2112,11 @@ export class PlaybackManager {
                 }
                 if (!item) return null;
 
-                // Only hijack video playback. Audio, channels, etc. keep
-                // using whatever the in-browser flow does today.
-                if (item.MediaType !== MediaType.Video) return null;
-
-                // Build the scene-style filename hint. Infuse uses this
-                // for TMDB metadata lookup, which is what AirPlay Now
-                // Playing renders on the TV. No zero-padding required.
-                let filename;
-                if (item.Type === BaseItemKind.Episode
-                        && item.SeriesName
-                        && item.ParentIndexNumber != null
-                        && item.IndexNumber != null) {
-                    filename = `${item.SeriesName}.S${item.ParentIndexNumber}E${item.IndexNumber}.${item.Name}.mp4`;
-                } else if (item.Type === BaseItemKind.Movie) {
-                    filename = item.ProductionYear ?
-                        `${item.Name}.${item.ProductionYear}.mp4` :
-                        `${item.Name}.mp4`;
-                } else {
-                    // Trailer, MusicVideo, Video, etc. — no scene-style
-                    // convention defined yet. Fall through to in-browser
-                    // player rather than guess.
-                    return null;
-                }
-
-                // Direct-stream URL. static=true tells Jellyfin to serve
-                // the original file with no transcoding — Infuse direct-
-                // plays whatever the bytes are.
                 const apiClient = ServerConnections.getApiClient(item.ServerId);
-                const serverUrl = apiClient.serverAddress();
-                const accessToken = apiClient.accessToken();
-                if (!serverUrl || !accessToken) return null;
-
-                const streamUrl =
-                    `${serverUrl}/Videos/${item.Id}/stream`
-                    + '?static=true'
-                    + `&api_key=${encodeURIComponent(accessToken)}`
-                    + `&MediaSourceId=${item.Id}`;
-
-                return 'infuse://x-callback-url/play'
-                    + `?url=${encodeURIComponent(streamUrl)}`
-                    + `&filename=${encodeURIComponent(filename)}`;
+                return buildInfuseUrl(item, {
+                    serverUrl: apiClient?.serverAddress(),
+                    accessToken: apiClient?.accessToken()
+                });
             } catch (err) {
                 console.warn('[infuse handoff] failed to build URL; falling back to in-browser player:', err);
                 return null;
