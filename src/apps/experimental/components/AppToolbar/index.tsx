@@ -27,8 +27,16 @@ const ExperimentalAppToolbar: FC<AppToolbarProps> = ({
     // The video osd does not show the standard toolbar
     if (location.pathname === '/video') return null;
 
-    // Only show the back button in apps when appropriate
-    const isBackButtonAvailable = window.NativeShell && appRouter.canGoBack(location.pathname);
+    // =====BEGIN HOMELAB BACK BUTTON=====
+    // Upstream gates the back button on `window.NativeShell` so it only appears
+    // inside the Jellyfin Media Player desktop wrappers. We use this fork from
+    // a plain browser (Safari on Mac/iPad), where drilling into a library item
+    // and then trying to navigate back is the most common UI complaint.
+    // Drop the NativeShell gate so the button appears whenever there's actually
+    // somewhere to go back to (`appRouter.canGoBack` already does the right
+    // thing — returns false on START_PAGE_PATHS like /home).
+    const isBackButtonAvailable = appRouter.canGoBack(location.pathname);
+    // =====END HOMELAB BACK BUTTON=====
 
     // Check if the current path is a public path to hide user content
     const isPublicPath = PUBLIC_PATHS.includes(location.pathname);

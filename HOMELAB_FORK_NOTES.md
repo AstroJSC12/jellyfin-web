@@ -173,6 +173,39 @@ already on the Jellyfin server. Trying to share code between them
 would mean shipping a JS module into a bash script context — net
 negative.
 
+## Feature: Back button visible in the browser (2026-05-17)
+
+Tiny one-line patch in
+`src/apps/experimental/components/AppToolbar/index.tsx`,
+wrapped in `=====BEGIN HOMELAB BACK BUTTON=====` markers.
+
+Upstream gates the toolbar back button on `window.NativeShell`,
+so it only ever renders inside the Jellyfin Media Player desktop
+wrappers — never in a plain browser. That's why drilling into a
+library item in the fork (Safari on Mac/iPad) leaves you with no
+way back to the previous view except clicking "Home" and
+re-navigating.
+
+The fix is to drop the `window.NativeShell &&` clause:
+
+```ts
+const isBackButtonAvailable = appRouter.canGoBack(location.pathname);
+```
+
+`appRouter.canGoBack` already does the right thing — it checks
+`window.history.length` and short-circuits to `false` on
+START_PAGE_PATHS like `/home` so the button doesn't render when
+there's nowhere meaningful to go. The wiring (icon, click
+handler, `appRouter.back()`) was already in
+`src/components/toolbar/AppToolbar.tsx`; we just weren't being
+allowed to use it.
+
+**Why this is rebase-safe:** the change is one expression on
+one line, behind clear marker comments, and the underlying
+`canGoBack` API is upstream-stable. If upstream eventually
+ships the same fix, the rebase conflict will be obvious — drop
+our marker block and take theirs.
+
 ## Why `rfc3986Encode` (not `encodeURIComponent`)
 
 `make-infuse-url.sh` uses `jq @uri` which encodes every char
