@@ -135,6 +135,44 @@ and the change would be invisible. Bumping the key invalidates
 one round of cached prefs per minor version. Users with
 intentional custom sorts will re-set them once.
 
+## Feature: Series/Season shuffle picks unplayed only (2026-05-14)
+
+Carries the iOS Shortcut's "shuffle only unwatched episodes" behavior
+into the web UI's Shuffle button. Wraps in `=====BEGIN HOMELAB SHUFFLE
+UNPLAYED=====` markers.
+
+- **`src/components/playback/playbackmanager.js`** — one marker block
+  inside `getSeriesOrSeasonPlaybackPromise` (~lines 1999-2045). When
+  `options.shuffle` is true and the user is shuffling a Series or
+  Season, the `apiClient.getEpisodes` call now includes
+  `Filters: 'IsUnplayed'`. If the result comes back empty (every
+  episode in scope is already watched), we re-query without the
+  filter, call `apiClient.markUnplayed(UserId, episodeId, date)` for
+  each played episode, then re-query for the random pick. This
+  mirrors `scripts/play-random-unplayed.sh --auto-reset` from the
+  homelab repo exactly. Non-shuffle (in-order) playback is untouched.
+
+**Source of truth is Jellyfin server-side `UserData.Played`**, so this
+auto-syncs with the iOS Shortcut, the shell script
+(`play-random-unplayed.sh`), and any other Jellyfin client — they all
+read/write the same flag.
+
+**Scope:** Series detail page Shuffle button, Season detail page
+Shuffle button, and any other code path that ends in
+`getSeriesOrSeasonPlaybackPromise` with `options.shuffle === true`.
+Does NOT touch shuffle for Movies, Collections, BoxSets, Playlists,
+Music, or Photos — those still shuffle across all items as upstream
+does.
+
+**Why we didn't merge this into the homelab repo as a shared lib:**
+the shell script is the iOS Shortcut backend (runs on the Mac, builds
+Infuse URLs for AirPlay handoff). The fork patch is the web UI
+button (runs in the browser, uses the SDK). They have different
+runtimes and different entry points; the only shared "state" is
+already on the Jellyfin server. Trying to share code between them
+would mean shipping a JS module into a bash script context — net
+negative.
+
 ## Why `rfc3986Encode` (not `encodeURIComponent`)
 
 `make-infuse-url.sh` uses `jq @uri` which encodes every char

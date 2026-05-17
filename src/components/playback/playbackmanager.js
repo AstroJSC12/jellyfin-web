@@ -1996,7 +1996,16 @@ export class PlaybackManager {
                 startItemId = nextUp?.Items?.[0]?.Id;
             }
 
-            const episodesResult = await apiClient.getEpisodes(SeriesId, {
+            // =====BEGIN HOMELAB SHUFFLE UNPLAYED=====
+            // When shuffling a Series or Season, only pick from unplayed
+            // episodes — matches the iOS Shortcut backed by
+            // ~/Projects/homelab/scripts/play-random-unplayed.sh. Source
+            // of truth for "watched" is Jellyfin's per-user
+            // UserData.Played, so this auto-syncs with the shortcut and
+            // any other Jellyfin client. If every episode in scope is
+            // already watched, mirror the shortcut's --auto-reset:
+            // mark them all unplayed server-side, then re-pick.
+            const buildEpisodesQuery = (extraFilters) => ({
                 IsVirtualUnaired: false,
                 IsMissing: false,
                 SeasonId: seasonId,
@@ -2005,8 +2014,35 @@ export class PlaybackManager {
                 SortBy: options.shuffle ? 'Random' : undefined,
                 UserId,
                 Fields: ['Chapters', 'Trickplay'],
-                startItemId
+                startItemId,
+                ...(extraFilters ? { Filters: extraFilters } : {})
             });
+
+            let episodesResult = await apiClient.getEpisodes(
+                SeriesId,
+                buildEpisodesQuery(options.shuffle ? 'IsUnplayed' : undefined)
+            );
+
+            if (options.shuffle && (!episodesResult.Items || episodesResult.Items.length === 0)) {
+                // Auto-reset: every episode in scope is watched.
+                // Re-query without the filter, mark each played episode
+                // unplayed, then re-query for the random pick.
+                const allEpisodes = await apiClient.getEpisodes(SeriesId, buildEpisodesQuery(undefined));
+                const playedIds = (allEpisodes.Items || [])
+                    .filter(e => e.UserData && e.UserData.Played)
+                    .map(e => e.Id);
+                if (playedIds.length > 0) {
+                    const resetDate = new Date();
+                    await Promise.all(
+                        playedIds.map(id => apiClient.markUnplayed(UserId, id, resetDate))
+                    );
+                    episodesResult = await apiClient.getEpisodes(
+                        SeriesId,
+                        buildEpisodesQuery('IsUnplayed')
+                    );
+                }
+            }
+            // =====END HOMELAB SHUFFLE UNPLAYED=====
 
             if (options.shuffle) {
                 episodesResult.StartIndex = 0;
