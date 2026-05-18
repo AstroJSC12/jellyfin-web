@@ -141,6 +141,24 @@ time_stage() {
     return $rc
 }
 
+# Same as time_stage but without the heartbeat — for stages that
+# prompt the user (e.g. sudo password). A ticker writing
+# "...still working" would clobber the password prompt and
+# generally make interactive output messy.
+time_stage_interactive() {
+    local label="$1"; shift
+    local start end rc
+    start=$(date +%s)
+    if "$@"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    end=$(date +%s)
+    printf '   (%s took %ss)\n' "$label" "$((end - start))"
+    return $rc
+}
+
 # ---------- preflight ----------
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [[ -z "$REPO_ROOT" ]]; then
@@ -248,20 +266,50 @@ time_stage "docker build" docker buildx build \
     --load \
     "$COMPOSE_LOCAL"
 
-# ---------- stage 5: ship image to NAS ----------
-banner "5/6  Ship image to $NAS_HOST  (~100 MB gzipped tarball over ssh)"
-# `docker save | gzip | ssh ... 'gunzip | sudo docker load'`. sudo on
-# DSM strips PATH so the docker binary needs its full path.
-time_stage "docker save+load" bash -c "
-    set -o pipefail
-    docker save '$IMAGE_TAG' | gzip | \
-        ssh '$NAS_HOST' 'gunzip | sudo /usr/local/bin/docker load'
-"
+# ---------- stage 5: upload image to NAS ----------
+# Two-step rather than the historical one-shot pipeline. The old
+# `docker save | gzip | ssh '... | sudo docker load'` form needs
+# passwordless sudo to work, because sudo can't prompt for a
+# password when its stdin is a stream of binary tarball bytes
+# and the ssh session has no TTY. We split: passwordless scp
+# upload here (stage 5), then interactive sudo for the load +
+# restart (stage 6). The remote tarball goes to /tmp (DSM tmpfs)
+# and is removed at the end of stage 6.
+banner "5/6  Upload image to $NAS_HOST  (~100 MB gzipped, scp)"
+REMOTE_TARBALL="/tmp/jellyfin-web-image-$$.tar.gz"
+LOCAL_TARBALL="$(mktemp -t jellyfin-web-image.XXXXXX).tar.gz"
 
-# ---------- stage 6: restart compose service on NAS ----------
-banner "6/6  Restart compose service on NAS (with --no-build so the NAS never tries to rebuild)"
-time_stage "compose up" ssh -t "$NAS_HOST" "
-    cd '$COMPOSE_REMOTE' && \
+# Make sure we clean up the local tarball no matter how the
+# script exits. The remote tarball is removed by stage 6's
+# trailing `rm` (and is on tmpfs anyway, so it's gone on reboot).
+add_local_tarball_cleanup() {
+    local existing
+    existing=$(trap -p EXIT | sed -n "s/^trap -- '\(.*\)' EXIT$/\1/p")
+    trap "${existing}; rm -f '$LOCAL_TARBALL'" EXIT
+}
+add_local_tarball_cleanup
+
+time_stage "docker save" bash -c "
+    set -o pipefail
+    docker save '$IMAGE_TAG' | gzip > '$LOCAL_TARBALL'
+"
+time_stage "scp upload" scp -O "$LOCAL_TARBALL" "$NAS_HOST:$REMOTE_TARBALL"
+
+# ---------- stage 6: load image + restart on NAS (one sudo session) ----------
+banner "6/6  Load image + restart container on NAS  (will prompt for your NAS sudo password)"
+# Single ssh -t session so:
+#   1. Sudo can prompt interactively (TTY allocated by -t).
+#   2. Both sudo invocations share the same TTY, so DSM's
+#      per-tty sudo timestamp means you only type the password
+#      once for the whole stage.
+# We deliberately do NOT use heartbeat here (the ticker would
+# scribble over the password prompt). Pipeline is constructed on
+# the remote side, so no binary-data-through-sudo problem.
+time_stage_interactive "load + compose up" ssh -t "$NAS_HOST" "
+    set -e
+    gunzip < '$REMOTE_TARBALL' | sudo /usr/local/bin/docker load
+    rm -f '$REMOTE_TARBALL'
+    cd '$COMPOSE_REMOTE'
     sudo /usr/local/bin/docker compose up -d --no-build
 "
 
