@@ -41,6 +41,25 @@ html {
     /* Set the default font for cases we don't load the brand font */
     font-family: Arial, Helvetica, sans-serif;
     line-height: 1.35;
+
+    // =====BEGIN HOMELAB IOS DOCUMENT OVERSCROLL=====
+    // Kill iOS Safari's elastic-bounce / "the whole page drags
+    // around like an infinite canvas" feel. Without this,
+    // touch-dragging on Jellyfin's home page on iOS can pan the
+    // entire document in any direction (vertical, horizontal,
+    // diagonal) because WebKit applies its rubber-band physics
+    // at the document level. `none` disables overscroll bounce
+    // on the document — normal vertical scrolling still works
+    // within the page's bounds, rows still scroll horizontally
+    // via their own .scrollX overflow.
+    //
+    // Tradeoff: Safari's native pull-to-refresh (which depends
+    // on overscroll) is also suppressed in plain-Safari mode.
+    // For the home-screen-installed PWA we have our own pull-
+    // to-refresh in components/pullToRefresh, so that case is
+    // covered. In plain-Safari mode, use the reload button.
+    overscroll-behavior: none;
+    // =====END HOMELAB IOS DOCUMENT OVERSCROLL=====
 }
 
 body {
@@ -48,6 +67,14 @@ body {
     overflow-x: hidden;
     background-color: transparent !important;
     -webkit-font-smoothing: antialiased;
+
+    // =====BEGIN HOMELAB IOS DOCUMENT OVERSCROLL=====
+    // Belt-and-suspenders: setting overscroll-behavior on `html`
+    // alone is enough on most browsers, but iOS Safari has had
+    // bugs where the root scroller is `<body>` and the rule
+    // needs to be on both. Doing both is harmless either way.
+    overscroll-behavior: none;
+    // =====END HOMELAB IOS DOCUMENT OVERSCROLL=====
 }
 
 .clipForScreenReader {
