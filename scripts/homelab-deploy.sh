@@ -201,14 +201,26 @@ DIRTY=""
 if ! git diff-index --quiet HEAD --; then
     DIRTY=" (working tree dirty)"
 fi
-DEPLOY_REF="${REF:-$CURRENT_BRANCH}"
+# Default --ref to the current commit SHA when not explicitly
+# given. This is critical: it pins the Dockerfile's `git checkout`
+# to a specific SHA, which means the docker layer cache
+# invalidates on every new commit. If we let it default to the
+# literal string "master" the RUN command never changes, so
+# docker happily re-uses the cached layer that has yesterday's
+# code checked out — the bug Jeff saw where dev notes / scroll
+# fix / shuffle pre-mark all ran through deploy but never made
+# it to the NAS.
+if [[ -z "$REF" ]]; then
+    REF=$(git rev-parse HEAD)
+fi
+DEPLOY_REF="$REF"
 
 banner "Deploying jellyfin-web fork to $NAS_HOST"
 cat <<INFO
   repo root:      $REPO_ROOT
   branch:         $CURRENT_BRANCH @ $CURRENT_SHA$DIRTY
   image tag:      $IMAGE_TAG
-  build ref:      $DEPLOY_REF  (the Dockerfile will git-checkout this on the NAS-arch builder)
+  build ref:      $DEPLOY_REF  (pinned SHA; invalidates docker cache per-commit)
   compose local:  $COMPOSE_LOCAL
   compose remote: $NAS_HOST:$COMPOSE_REMOTE
   verify URL:     $VERIFY_URL
@@ -219,68 +231,111 @@ if [[ -n "$DIRTY" && $SKIP_PUSH -eq 0 ]]; then
     warn "(the Dockerfile clones fresh from GitHub; only pushed commits make it through)"
 fi
 
-# ---------- stage 1: local checks ----------
+# ---------- stage 1: cache NAS sudo password ----------
+# Prompt once up front so the rest of the script runs unattended.
+# Password is held in a shell variable for the duration of the
+# script and piped to remote `sudo -S` via stdin in stage 7. It's
+# never put in a process arg, env var, or shell history, so it's
+# not visible via `ps`. printf is a bash builtin, so even the
+# pipe-construction step doesn't fork a process carrying the
+# value. Stays in memory for ~3 minutes during deploy.
+banner "1/7  Cache NAS sudo password (one-time prompt, then walk away)"
+NAS_SUDO_PASS=""
+read -r -s -p "   NAS sudo password for $NAS_HOST: " NAS_SUDO_PASS
+echo
+if [[ -z "$NAS_SUDO_PASS" ]]; then
+    fail "no password entered; aborting"
+fi
+# Validate immediately so a typo doesn't waste 80 seconds of
+# build time. `sudo -k` first clears any cached creds so we're
+# actually testing the password we just got, not a stale cache.
+# `-S` reads password from stdin, `-p ""` suppresses the prompt
+# string (we don't need it since we're piping). `-v` just
+# refreshes the credential timestamp without running a command.
+if ! printf '%s\n' "$NAS_SUDO_PASS" | ssh "$NAS_HOST" "sudo -k -S -p '' -v" >/dev/null 2>&1; then
+    fail "sudo password did not validate against $NAS_HOST; check it and retry"
+fi
+echo "   password validated, sudo cache refreshed on NAS ✓"
+
+# Helper to run a multi-line script as root on the NAS with the
+# cached password. Password is piped via stdin (not args), so it
+# doesn't leak into `ps`. The remote command runs under `sh -c`
+# inside sudo, which we accomplish by reading the script body on
+# the remote side via heredoc.
+remote_sudo_script() {
+    local script="$1"
+    # Concatenate password + script body, separated by newline.
+    # sudo reads up to the first newline as password, then runs
+    # the command with the rest available on stdin (but we pass
+    # the script as -c arg, not stdin, so the rest is ignored).
+    printf '%s\n' "$NAS_SUDO_PASS" \
+        | ssh "$NAS_HOST" "sudo -S -p '' bash -c $(printf '%q' "$script")"
+}
+
+# ---------- stage 2: local checks ----------
 if [[ $SKIP_CHECKS -eq 0 ]]; then
-    banner "1/6  Lint + type check (Node $(node --version 2>/dev/null || echo '???'))"
-    time_stage "lint" npm run lint
+    banner "2/7  Lint + type check (Node $(node --version 2>/dev/null || echo '???'))"
+    # --quiet suppresses warnings and only shows errors. Upstream
+    # Jellyfin has ~96 pre-existing warnings in stock code (Grid
+    # deprecations, HACK comments, fixme tags, etc.) that flood
+    # the deploy output every run. They never block the build
+    # (warnings ≠ errors) but make it hard to see what's actually
+    # happening. If our fork ever adds a real lint *error* (not a
+    # warning), eslint will print it and exit non-zero, which
+    # time_stage will treat as failure.
+    time_stage "lint" npm run lint -- --quiet
     time_stage "build:check" npm run build:check
 else
-    banner "1/6  Lint + type check  (skipped)"
+    banner "2/7  Lint + type check  (skipped)"
 fi
 
-# ---------- stage 2: git push ----------
+# ---------- stage 3: git push ----------
 if [[ $SKIP_PUSH -eq 0 ]]; then
-    banner "2/6  Push $CURRENT_BRANCH to origin"
-    if [[ -n "$REF" ]]; then
-        warn "--ref was given; pushing current branch anyway so the ref is reachable"
-    fi
+    banner "3/7  Push $CURRENT_BRANCH to origin"
     time_stage "git push" git push origin "$CURRENT_BRANCH"
 else
-    banner "2/6  Git push  (skipped — make sure ref '$DEPLOY_REF' is already on origin)"
+    banner "3/7  Git push  (skipped — make sure ref '$DEPLOY_REF' is already on origin)"
 fi
 
-# ---------- stage 3: optional compose copy ----------
+# ---------- stage 4: optional compose copy ----------
 if [[ $COPY_COMPOSE -eq 1 ]]; then
-    banner "3/6  Copy compose files to NAS"
+    banner "4/7  Copy compose files to NAS"
     # scp on macOS now defaults to SFTP, which DSM doesn't enable.
     # -O forces the legacy SCP protocol.
     time_stage "scp" scp -O -r "$COMPOSE_LOCAL" "$NAS_HOST:$(dirname "$COMPOSE_REMOTE")/"
 else
-    banner "3/6  Copy compose files  (skipped — pass --copy-compose if compose/nginx/Dockerfile changed)"
+    banner "4/7  Copy compose files  (skipped — pass --copy-compose if compose/nginx/Dockerfile changed)"
 fi
 
-# ---------- stage 4: build image on Mac ----------
-banner "4/6  Build $IMAGE_TAG for linux/amd64 (this is the heavy step, ~80s on M-series)"
+# ---------- stage 5: build image on Mac ----------
+banner "5/7  Build $IMAGE_TAG for linux/amd64 @ $DEPLOY_REF (this is the heavy step, ~80s on M-series)"
 # NB: macOS's system bash is 3.2; with `set -u`, expanding
-# "${BUILD_ARGS[@]}" on an empty array (no --ref passed) throws
-# "unbound variable". The `${arr[@]+"${arr[@]}"}` form expands to
-# nothing when the array is empty and to the values otherwise.
-BUILD_ARGS=()
-if [[ -n "$REF" ]]; then
-    BUILD_ARGS+=(--build-arg "REF=$REF")
-fi
+# "${BUILD_ARGS[@]}" on an empty array throws "unbound variable".
+# The `${arr[@]+"${arr[@]}"}` form expands to nothing when empty
+# and to the values otherwise.
+#
+# We always pass --build-arg REF=<sha> (set above) so the
+# Dockerfile's git-checkout RUN string differs per commit and
+# docker's layer cache invalidates cleanly. Without this the
+# build silently reuses yesterday's checkout (see comment near
+# REF default).
+BUILD_ARGS=(--build-arg "REF=$REF")
 time_stage "docker build" docker buildx build \
     --platform linux/amd64 \
-    ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} \
+    "${BUILD_ARGS[@]}" \
     -t "$IMAGE_TAG" \
     --load \
     "$COMPOSE_LOCAL"
 
-# ---------- stage 5: upload image to NAS ----------
-# Two-step rather than the historical one-shot pipeline. The old
-# `docker save | gzip | ssh '... | sudo docker load'` form needs
-# passwordless sudo to work, because sudo can't prompt for a
-# password when its stdin is a stream of binary tarball bytes
-# and the ssh session has no TTY. We split: passwordless scp
-# upload here (stage 5), then interactive sudo for the load +
-# restart (stage 6). The remote tarball goes to /tmp (DSM tmpfs)
-# and is removed at the end of stage 6.
-banner "5/6  Upload image to $NAS_HOST  (~100 MB gzipped, scp)"
+# ---------- stage 6: upload image to NAS ----------
+# Passwordless scp; the sudo-needing steps run in stage 7 using
+# the password cached at stage 1.
+banner "6/7  Upload image to $NAS_HOST  (~100 MB gzipped, scp)"
 REMOTE_TARBALL="/tmp/jellyfin-web-image-$$.tar.gz"
 LOCAL_TARBALL="$(mktemp -t jellyfin-web-image.XXXXXX).tar.gz"
 
 # Make sure we clean up the local tarball no matter how the
-# script exits. The remote tarball is removed by stage 6's
+# script exits. The remote tarball is removed by stage 7's
 # trailing `rm` (and is on tmpfs anyway, so it's gone on reboot).
 add_local_tarball_cleanup() {
     local existing
@@ -295,36 +350,44 @@ time_stage "docker save" bash -c "
 "
 time_stage "scp upload" scp -O "$LOCAL_TARBALL" "$NAS_HOST:$REMOTE_TARBALL"
 
-# ---------- stage 6: load image + restart on NAS (one sudo session) ----------
-banner "6/6  Load image + restart container on NAS  (will prompt for your NAS sudo password)"
-# Single ssh -t session so:
-#   1. Sudo can prompt interactively (TTY allocated by -t).
-#   2. Both sudo invocations share the same TTY, so DSM's
-#      per-tty sudo timestamp means you only type the password
-#      once for the whole stage.
-# We deliberately do NOT use heartbeat here (the ticker would
-# scribble over the password prompt). Pipeline is constructed on
-# the remote side, so no binary-data-through-sudo problem.
-time_stage_interactive "load + compose up" ssh -t "$NAS_HOST" "
-    set -e
-    gunzip < '$REMOTE_TARBALL' | sudo /usr/local/bin/docker load
-    rm -f '$REMOTE_TARBALL'
-    cd '$COMPOSE_REMOTE'
-    sudo /usr/local/bin/docker compose up -d --no-build
+# ---------- stage 7: load image + restart on NAS (unattended) ----------
+banner "7/7  Load image + restart container on NAS (unattended; cached password)"
+# Build the remote script as a single string, then run it via
+# remote_sudo_script which pipes our cached password to sudo -S.
+# All the commands run as root inside the one sudo invocation.
+REMOTE_SCRIPT="
+set -eo pipefail
+gunzip < '$REMOTE_TARBALL' | /usr/local/bin/docker load
+rm -f '$REMOTE_TARBALL'
+cd '$COMPOSE_REMOTE'
+/usr/local/bin/docker compose up -d --no-build
 "
+time_stage "load + compose up" remote_sudo_script "$REMOTE_SCRIPT"
 
 # ---------- verify ----------
+# Nginx inside the new container needs a moment after `Started`
+# to actually accept connections — previously this stage would
+# report HTTP 000 / empty reply if curl happened to fire during
+# that ~1s window. Retry up to ~20s before giving up.
 banner "Verifying $VERIFY_URL"
-HTTP_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' "$VERIFY_URL" || echo 'ERR')
+HTTP_STATUS=""
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    HTTP_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 "$VERIFY_URL" 2>/dev/null || echo '000')
+    if [[ "$HTTP_STATUS" == "200" ]]; then
+        echo "   HTTP $HTTP_STATUS  ✓  (attempt $attempt)"
+        break
+    fi
+    if [[ $attempt -lt 10 ]]; then
+        sleep 2
+    fi
+done
 if [[ "$HTTP_STATUS" != "200" ]]; then
-    warn "expected HTTP 200, got: $HTTP_STATUS"
-    warn "(container may still be starting; try again in a few seconds)"
-else
-    echo "   HTTP $HTTP_STATUS  ✓"
+    warn "still no HTTP 200 after 10 attempts (got: $HTTP_STATUS)"
+    warn "check container logs: ssh $NAS_HOST 'cd $COMPOSE_REMOTE && sudo /usr/local/bin/docker compose logs --tail=50'"
 fi
 
 BUILDINFO_URL="${VERIFY_URL%/}/.buildinfo"
-BUILDINFO=$(curl -sS "$BUILDINFO_URL" 2>/dev/null || echo '???')
+BUILDINFO=$(curl -sS --max-time 3 "$BUILDINFO_URL" 2>/dev/null || echo '???')
 echo "   .buildinfo: $BUILDINFO"
 
 banner "Done."
