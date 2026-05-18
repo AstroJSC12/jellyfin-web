@@ -165,6 +165,15 @@ async function loadPlugins() {
 }
 
 function loadPlatformFeatures() {
+    // =====BEGIN HOMELAB PULL TO REFRESH=====
+    // Re-add the pull-to-refresh gesture that iOS strips from
+    // standalone PWAs. Module self-gates on iOS + standalone, so
+    // it's a no-op everywhere else. See pullToRefresh.ts.
+    if (browser.iOS) {
+        import('./components/pullToRefresh/pullToRefresh').then(mod => mod.init());
+    }
+    // =====END HOMELAB PULL TO REFRESH=====
+
     if (!browser.tv && !browser.xboxOne && !browser.ps4) {
         import('./components/nowPlayingBar/nowPlayingBar');
     }

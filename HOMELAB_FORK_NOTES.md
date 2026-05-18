@@ -461,6 +461,33 @@ passing `--platform linux/amd64` to the Mac build and
 `--no-build` to the NAS-side compose up. If those flags fail,
 something has drifted; **don't** work around it on the NAS.
 
+## Pull-to-refresh (iOS standalone PWA)
+
+iOS strips Safari's native pull-to-refresh gesture when the app
+is launched from the home screen (`navigator.standalone === true`).
+This adds it back. Wrapped in
+`=====HOMELAB PULL TO REFRESH=====` markers in two places:
+
+- **`src/components/pullToRefresh/pullToRefresh.ts`** — new
+  module. Listens for vertical pulls at the top of the document
+  (`scrollY === 0`), draws a small circular indicator that
+  tracks the pull, and calls `window.location.reload()` when the
+  user releases past a 70px (damped) threshold. Module self-
+  gates on `browser.iOS && navigator.standalone`, so it's a
+  no-op everywhere else. Horizontal swipes on rows can't
+  accidentally trigger it because activation requires
+  `|deltaY| > |deltaX|`.
+- **`src/index.jsx`** — `loadPlatformFeatures()` dynamically
+  imports the module on iOS. The module's own self-gate handles
+  the standalone-vs-Safari distinction at runtime so a user who
+  opens the URL in iOS Safari directly (not from the home-screen
+  icon) gets Safari's native pull-to-refresh instead of ours.
+
+Visual indicator is inline-styled (no separate SCSS file) and
+uses the unicode refresh glyph (↻) so it doesn't depend on any
+icon font being loaded. Honors `env(safe-area-inset-top)` so it
+doesn't appear under the dynamic island / notch.
+
 ## Row swipe containment (iOS Safari)
 
 Single-line CSS patch in `src/styles/scrollstyles.scss` inside a
