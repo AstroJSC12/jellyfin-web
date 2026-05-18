@@ -1997,14 +1997,29 @@ export class PlaybackManager {
             }
 
             // =====BEGIN HOMELAB SHUFFLE UNPLAYED=====
-            // When shuffling a Series or Season, only pick from unplayed
-            // episodes — matches the iOS Shortcut backed by
-            // ~/Projects/homelab/scripts/play-random-unplayed.sh. Source
-            // of truth for "watched" is Jellyfin's per-user
-            // UserData.Played, so this auto-syncs with the shortcut and
-            // any other Jellyfin client. If every episode in scope is
-            // already watched, mirror the shortcut's --auto-reset:
-            // mark them all unplayed server-side, then re-pick.
+            // Two-part homelab fork behavior for shuffle:
+            //
+            // 1. PICK FROM UNPLAYED ONLY. When shuffling a Series or
+            //    Season, filter episodes by IsUnplayed. Matches the iOS
+            //    Shortcut backed by play-random-unplayed.sh in the
+            //    homelab repo. Source of truth for "watched" is
+            //    Jellyfin's per-user UserData.Played, so this auto-syncs
+            //    with the shortcut and any other Jellyfin client. If
+            //    every episode in scope is already watched, mirror the
+            //    shortcut's --auto-reset: mark them all unplayed server-
+            //    side, then re-pick.
+            //
+            // 2. MARK PLAYED AT TRIGGER TIME. As soon as the random pick
+            //    is made, mark THAT episode played — before the user
+            //    actually watches any of it. This is the deliberate
+            //    trade-off Jeff wants: shuffle should keep serving fresh
+            //    episodes even when he skips out partway, instead of
+            //    re-picking the same handful of unfinished ones from a
+            //    shrinking IsUnplayed pool. Shuffle history accuracy is
+            //    sacrificed for variety. Click-to-play and ordered queue
+            //    playback are NOT affected — they still mark-on-complete
+            //    via the in-browser player or the Infuse handoff's
+            //    post-handoff markPlayed call.
             const buildEpisodesQuery = (extraFilters) => ({
                 IsVirtualUnaired: false,
                 IsMissing: false,
@@ -2040,6 +2055,29 @@ export class PlaybackManager {
                         SeriesId,
                         buildEpisodesQuery('IsUnplayed')
                     );
+                }
+            }
+
+            // Behavior #2: pre-mark the picked-shuffle episode played.
+            // Fire-and-forget; we don't await it because the user is
+            // about to start watching and a stalled markPlayed
+            // shouldn't delay playback. The worst case on failure is
+            // exactly the bug we're fixing (episode resurfaces in the
+            // next shuffle), and we log the warning.
+            if (options.shuffle && episodesResult?.Items?.length) {
+                const picked = episodesResult.Items[0];
+                if (picked?.Id) {
+                    apiClient.markPlayed(UserId, picked.Id, new Date())
+                        ?.catch?.((err) => {
+                            console.warn('[homelab shuffle] markPlayed failed (non-fatal):', err);
+                        });
+                    // Mirror the optimistic state on the in-memory item
+                    // so any downstream consumer that re-reads UserData
+                    // (resume-index calc, etc.) sees the same truth the
+                    // server now has.
+                    if (picked.UserData) {
+                        picked.UserData.Played = true;
+                    }
                 }
             }
             // =====END HOMELAB SHUFFLE UNPLAYED=====
@@ -2127,9 +2165,14 @@ export class PlaybackManager {
         // =====BEGIN HOMELAB INFUSE HANDOFF=====
         // Resolve the first video item from a play() options bag and
         // hand it to the pure URL builder in ./infuseUrl.js. Returns
-        // null when the item can't / shouldn't be handed off (audio,
+        // { url, item, apiClient } when the handoff is viable, or null
+        // when the item can't / shouldn't be handed off (audio,
         // unknown type, missing metadata, no server context) so the
-        // caller falls back to the in-browser player.
+        // caller falls back to the in-browser player. We return the
+        // item + apiClient (not just the URL) so the caller can mark
+        // the item played in Jellyfin at handoff time — Infuse never
+        // scrobbles back, so without this 'Continue Watching' / 'Next
+        // Up' surfaces stay anchored on the same episode forever.
         // See docs/INFUSE_URL_SCHEME.md in the homelab repo.
         async function tryBuildInfuseUrl(options) {
             try {
@@ -2149,13 +2192,35 @@ export class PlaybackManager {
                 if (!item) return null;
 
                 const apiClient = ServerConnections.getApiClient(item.ServerId);
-                return buildInfuseUrl(item, {
+                const url = buildInfuseUrl(item, {
                     serverUrl: apiClient?.serverAddress(),
                     accessToken: apiClient?.accessToken()
                 });
+                if (!url) return null;
+                return { url, item, apiClient };
             } catch (err) {
                 console.warn('[infuse handoff] failed to build URL; falling back to in-browser player:', err);
                 return null;
+            }
+        }
+
+        // Mark the handed-off item as played in Jellyfin. Fire-and-
+        // forget — we don't await before dispatching to Infuse. Setting
+        // location.href to a custom-scheme URL doesn't unload the page,
+        // so the in-flight XHR completes normally. Failure is logged
+        // and swallowed; the worst case is the next 'Continue Watching'
+        // pick repeats the episode (the very bug we're fixing), which
+        // is no worse than upstream behavior.
+        function markInfuseHandoffPlayed(handoff) {
+            try {
+                const userId = handoff.apiClient?.getCurrentUserId?.();
+                if (!userId || !handoff.item?.Id) return;
+                handoff.apiClient.markPlayed(userId, handoff.item.Id, new Date())
+                    ?.catch?.((err) => {
+                        console.warn('[infuse handoff] markPlayed failed (non-fatal):', err);
+                    });
+            } catch (err) {
+                console.warn('[infuse handoff] markPlayed threw (non-fatal):', err);
             }
         }
         // =====END HOMELAB INFUSE HANDOFF=====
@@ -2182,10 +2247,18 @@ export class PlaybackManager {
             // shape, the conventions, and why the naive form is wrong.
             // Audio and unsupported item types fall through to the
             // in-browser player.
+            //
+            // Mark the item Played in Jellyfin BEFORE dispatching, so
+            // 'Continue Watching' / 'Next Up' / 'IsUnplayed' filters
+            // advance on the next refresh. Infuse plays from a raw
+            // /Videos/{id}/stream URL with no session token, so it
+            // never scrobbles back — without this optimistic mark, the
+            // same episode resurfaces forever.
             if (appSettings.enableSystemExternalPlayers()) {
-                const infuseUrl = await tryBuildInfuseUrl(options);
-                if (infuseUrl) {
-                    window.location.href = infuseUrl;
+                const handoff = await tryBuildInfuseUrl(options);
+                if (handoff) {
+                    markInfuseHandoffPlayed(handoff);
+                    window.location.href = handoff.url;
                     return;
                 }
             }

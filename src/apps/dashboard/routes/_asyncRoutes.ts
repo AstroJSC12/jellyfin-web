@@ -7,6 +7,9 @@ export const ASYNC_ADMIN_ROUTES: AsyncRoute[] = [
     { path: 'backups', type: AppType.Dashboard },
     { path: 'branding', type: AppType.Dashboard },
     { path: 'devices', type: AppType.Dashboard },
+    // =====BEGIN HOMELAB DEV NOTES=====
+    { path: 'devnotes', type: AppType.Dashboard },
+    // =====END HOMELAB DEV NOTES=====
     { path: 'settings', type: AppType.Dashboard },
     { path: 'keys', type: AppType.Dashboard },
     { path: 'libraries', type: AppType.Dashboard },

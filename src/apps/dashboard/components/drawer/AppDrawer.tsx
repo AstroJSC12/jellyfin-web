@@ -10,6 +10,9 @@ import DevicesDrawerSection from './sections/DevicesDrawerSection';
 import LiveTvDrawerSection from './sections/LiveTvDrawerSection';
 import AdvancedDrawerSection from './sections/AdvancedDrawerSection';
 import PluginDrawerSection from './sections/PluginDrawerSection';
+// =====BEGIN HOMELAB DEV NOTES=====
+import HomelabDrawerSection from './sections/HomelabDrawerSection';
+// =====END HOMELAB DEV NOTES=====
 
 const AppDrawer: FC<ResponsiveDrawerProps> = ({
     open = false,
@@ -31,6 +34,9 @@ const AppDrawer: FC<ResponsiveDrawerProps> = ({
         <LiveTvDrawerSection />
         <PluginDrawerSection />
         <AdvancedDrawerSection />
+        {/* =====BEGIN HOMELAB DEV NOTES===== */}
+        <HomelabDrawerSection />
+        {/* =====END HOMELAB DEV NOTES===== */}
     </ResponsiveDrawer>
 );
 

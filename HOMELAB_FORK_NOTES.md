@@ -142,15 +142,29 @@ into the web UI's Shuffle button. Wraps in `=====BEGIN HOMELAB SHUFFLE
 UNPLAYED=====` markers.
 
 - **`src/components/playback/playbackmanager.js`** — one marker block
-  inside `getSeriesOrSeasonPlaybackPromise` (~lines 1999-2045). When
-  `options.shuffle` is true and the user is shuffling a Series or
-  Season, the `apiClient.getEpisodes` call now includes
-  `Filters: 'IsUnplayed'`. If the result comes back empty (every
-  episode in scope is already watched), we re-query without the
-  filter, call `apiClient.markUnplayed(UserId, episodeId, date)` for
-  each played episode, then re-query for the random pick. This
-  mirrors `scripts/play-random-unplayed.sh --auto-reset` from the
-  homelab repo exactly. Non-shuffle (in-order) playback is untouched.
+  inside `getSeriesOrSeasonPlaybackPromise`. Two behaviors:
+
+  1. **Pick from unplayed only.** When `options.shuffle` is true and
+     the user is shuffling a Series or Season, the
+     `apiClient.getEpisodes` call includes `Filters: 'IsUnplayed'`. If
+     the result comes back empty (every episode in scope is already
+     watched), we re-query without the filter, call
+     `apiClient.markUnplayed(UserId, episodeId, date)` for each played
+     episode, then re-query for the random pick. This mirrors
+     `scripts/play-random-unplayed.sh --auto-reset` from the homelab
+     repo exactly.
+  2. **Pre-mark played at trigger time** (added 2026-05-18). As soon
+     as a random episode is picked, fire `apiClient.markPlayed` on
+     it before playback starts. Without this, hitting Shuffle and
+     skipping out partway leaves the episode "unplayed", so the next
+     Shuffle keeps re-picking the same handful from a shrinking pool.
+     The explicit trade-off: shuffle history fidelity is sacrificed
+     for genuine variety. Call is fire-and-forget; failure logs a
+     warning and degrades to upstream behavior. Click-to-play and
+     ordered queues are NOT affected — they still mark-on-complete
+     via the in-browser player or the Infuse handoff.
+
+  Non-shuffle (in-order) playback is untouched throughout.
 
 **Source of truth is Jellyfin server-side `UserData.Played`**, so this
 auto-syncs with the iOS Shortcut, the shell script
@@ -205,6 +219,56 @@ one line, behind clear marker comments, and the underlying
 `canGoBack` API is upstream-stable. If upstream eventually
 ships the same fix, the rebase conflict will be obvious — drop
 our marker block and take theirs.
+
+## Feature: Mark-on-handoff for "Continue Watching" (2026-05-17)
+
+The Infuse handoff has a structural blind spot: Infuse plays
+from a raw `/Videos/{id}/stream?static=true&api_key=...` URL
+with no session token, so it never hits Jellyfin's
+`/Sessions/Playing` or `/Sessions/Playing/Stopped` endpoints.
+Jellyfin's `UserData.LastPlayedDate`, `Played`, and
+`PlaybackPositionTicks` therefore stay frozen at whatever they
+were before Infuse got involved. Practical consequence: clicking
+"Continue Watching" / "Next Up" in the web UI for the
+just-finished episode would re-launch the same episode forever,
+because Jellyfin still thinks it's the resume target.
+
+Fix lives inside the existing `=====HOMELAB INFUSE HANDOFF=====`
+marker block in `playbackmanager.js` — no new marker scope:
+
+- `tryBuildInfuseUrl(options)` now returns
+  `{ url, item, apiClient }` (or null) instead of just the URL
+  string, so the caller has the context to mark the item played.
+- New helper `markInfuseHandoffPlayed(handoff)` calls
+  `apiClient.markPlayed(userId, itemId, new Date())`
+  fire-and-forget. We don't `await` before navigating to the
+  `infuse://` URL — setting `location.href` to a custom-scheme
+  URL doesn't unload the page, so the in-flight XHR completes
+  normally. Failures are logged and swallowed.
+- `self.play()` now calls the marker before
+  `window.location.href = handoff.url`.
+
+**Trade-off:** if the user dispatches the URL but cancels
+Safari's "Open in Infuse?" prompt (or bails 30s into Infuse
+playback), the item is still marked Played. Recovery is the
+manual "Mark Unplayed" button on the item-detail page.
+Acceptable because the alternative — the actual upstream
+behavior — is the bug we're fixing.
+
+**Sister-repo scripts get the same patch.** The same handoff
+blind spot bites
+`~/Projects/homelab/scripts/play-next-episode.sh` and
+`~/Projects/homelab/scripts/play-random-unplayed.sh` (the iOS
+Shortcut backends). Both now POST
+`/Users/{uid}/PlayedItems/{epId}` at script exit, after printing
+the URL line. Same trade-off, same recovery.
+
+**Why this is rebase-safe:** the change is fully inside the
+existing INFUSE HANDOFF marker block. `apiClient.markPlayed` is
+a stable upstream SDK method (used by upstream's
+`emby-playstatebutton`, `userdatabuttons`, etc.). If upstream
+ever changes how external-player playback is reported back to
+the server, drop our marker block and use theirs.
 
 ## Why `rfc3986Encode` (not `encodeURIComponent`)
 
@@ -363,6 +427,116 @@ stores whatever URL you enter at first-login in localStorage,
 so prefer the Tailscale hostname for consistency across
 networks. Same goes for the deployed PWA at
 `http://jeff-nas.taild6c575.ts.net:8097`.
+
+## Deploying changes
+
+The canonical procedure (Mac-build, ship, NAS run with
+`--no-build`) is wrapped by `scripts/homelab-deploy.sh`. Typical
+iteration is just:
+
+```bash
+./scripts/homelab-deploy.sh
+```
+
+That runs lint + typecheck → `git push origin <branch>` →
+`docker buildx build --platform linux/amd64` on the Mac →
+`docker save | ssh ... docker load` to ship to the NAS →
+`docker compose up -d --no-build` to restart the service →
+verifies HTTP 200 and prints `.buildinfo`.
+
+Useful flags (run `./scripts/homelab-deploy.sh --help` for the
+full list):
+
+- `--skip-checks` — skip lint/typecheck (faster mid-iteration).
+- `--skip-push` — deploy an already-pushed commit; useful for
+  redeploys or for testing a teammate's branch.
+- `--copy-compose` — also `scp` the compose folder up; only
+  needed when `Dockerfile`, `docker-compose.yml`, or
+  `nginx.conf` have changed in the homelab repo.
+- `--ref <sha-or-tag>` — pin the in-image git checkout to a
+  specific ref instead of `master`.
+
+The script enforces the never-build-on-NAS rule by always
+passing `--platform linux/amd64` to the Mac build and
+`--no-build` to the NAS-side compose up. If those flags fail,
+something has drifted; **don't** work around it on the NAS.
+
+## Row swipe containment (iOS Safari)
+
+Single-line CSS patch in `src/styles/scrollstyles.scss` inside a
+`=====HOMELAB ROW SCROLL=====` marker block. Adds
+`overscroll-behavior-x: contain` to `.scrollX` (the class
+Jellyfin's row scroller applies to horizontal sliders like
+"Continue Watching", "Next Up", "Recently Added", etc.).
+
+Why: on iPad/iPhone Safari, swiping left on a row would
+sometimes "chain" the gesture out to an ancestor container and
+make the whole page feel like it was panning around. Stock
+Jellyfin behavior, not something the fork broke — just papercut
+UX that's free to fix here. `contain` stops the overscroll
+chain at the row boundary; vertical page scrolling still works
+because the rule is axis-scoped to `-x`.
+
+Applies to every horizontal scroller on the site (libraries,
+favorites, search, etc.), not just the home page. Same root
+cause, same fix everywhere.
+
+## Dev Notes (admin dashboard, fork-only feature)
+
+A small in-app scratchpad for capturing "things to build / fix /
+improve" without leaving the Jellyfin UI. Lives in the admin
+dashboard at `/dashboard/devnotes` with a sidebar entry under a
+new "Homelab" section.
+
+Why this exists: Jeff wanted somewhere to jot quick dev ideas
+mid-flow while using the homelab. localStorage-only would have
+been fastest, but cross-device sync (Mac, iPad, iPhone, dev box)
+was the actual ask.
+
+Persistence: Jellyfin's user `DisplayPreferences` API. Each note
+is `{ id, title, body, createdAt, updatedAt }`; the array is
+JSON-stringified into `CustomPrefs.notes` of a per-user pref
+record keyed by `displayPreferencesId="homelab-devnotes"` and
+`client="homelab-fork"`. Saves automatically on field blur.
+Last-write-wins across devices (acceptable for single-user dev
+notes; failure mode would be losing one device's edits, not
+corruption).
+
+Files (all marked with `=====BEGIN HOMELAB DEV NOTES=====` /
+`=====END HOMELAB DEV NOTES=====` for rebase ergonomics):
+
+- **`src/apps/dashboard/routes/devnotes/index.tsx`** — new
+  fork-only file. The page itself (list + add/edit/delete +
+  autosave). Uses `useApi`, `getDisplayPreferencesApi`, and the
+  same react-query patterns as the existing dashboard pages
+  (`activity`, `settings`).
+- **`src/apps/dashboard/components/drawer/sections/HomelabDrawerSection.tsx`**
+  — new fork-only file. Sidebar section with one entry (Dev
+  Notes). Kept in its own file so the upstream `AppDrawer.tsx`
+  edit is just one import + one render line, both inside marker
+  blocks.
+- **`src/apps/dashboard/routes/_asyncRoutes.ts`** — registers
+  `'devnotes'` in the dashboard async route table.
+- **`src/apps/dashboard/components/drawer/AppDrawer.tsx`** —
+  imports and renders `HomelabDrawerSection` after the existing
+  upstream sections.
+
+Rebase risk: low and additive. The two upstream files we touch
+(`_asyncRoutes.ts`, `AppDrawer.tsx`) are stable structurally;
+edits live entirely inside marker blocks; the heavy lifting is
+in fork-only files upstream never touches. If a future upstream
+rebase conflicts on either file, the fix is mechanical.
+
+Failure modes worth knowing:
+
+- If the Jellyfin server is down, the page won't load — same as
+  the rest of the dashboard.
+- If a save fails (network blip, server restart), the page shows
+  an error banner; the edit stays in component state and any
+  further edit retries the save. Worst case: edit lost on page
+  reload.
+- Notes ride along with Jellyfin's DB (which you snapshot via
+  Synology). No separate backup needed.
 
 ## Branch / commit hygiene
 

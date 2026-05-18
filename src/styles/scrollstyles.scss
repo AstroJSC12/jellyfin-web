@@ -2,6 +2,17 @@
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
+
+    // =====BEGIN HOMELAB ROW SCROLL=====
+    // Stop horizontal swipes on a row (Continue Watching, Next Up,
+    // etc.) from "chaining" up to ancestor containers on iOS
+    // Safari. Without this, swiping past the row's scroll edge
+    // lets the gesture bleed into the page and feel like the
+    // whole layout is panning around. `contain` keeps overscroll
+    // inside the row; vertical page scroll is unaffected.
+    // See HOMELAB_FORK_NOTES.md → "Row swipe containment".
+    overscroll-behavior-x: contain;
+    // =====END HOMELAB ROW SCROLL=====
 }
 
 .smoothScrollX {
