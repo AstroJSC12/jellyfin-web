@@ -277,6 +277,35 @@ export const detectBrowser = (userAgent = navigator.userAgent) => {
         browser.mobile = true;
     }
 
+    // =====BEGIN HOMELAB IPAD AS MOBILE=====
+    // iPad on iOS 13+ reports its userAgent as desktop Safari
+    // (MacIntel), so `isMobile()` above misses it and leaves
+    // `browser.mobile = false`. The block ~10 lines up catches
+    // the iPad via `navigator.maxTouchPoints` and sets
+    // `browser.ipad = true`, but never flips `mobile` to match.
+    //
+    // Consequence on iPad in plain Safari: layoutManager picks
+    // Desktop layout (see apphost.getDefaultLayout +
+    // layoutManager experimental path), which makes
+    // emby-scroller turn on `enableScrollButtons` and use
+    // transform-based touch dragging with passive listeners.
+    // Those listeners can't preventDefault, so a horizontal
+    // swipe on a row both animates the row AND pans the
+    // viewport — the "whole page scrolls horizontally" bug.
+    // iPhone is fine because its UA does contain "iphone", so
+    // it gets Mobile layout and rows use native overflow scroll.
+    //
+    // Fix: treat the maxTouchPoints-detected iPad as mobile too.
+    // This makes Jellyfin use Mobile layout on iPad, which
+    // matches how it (correctly) treats iPhone: bigger touch
+    // targets, native overflow scrolling on rows, no scroll
+    // buttons, no transform-based drag handlers fighting the
+    // browser's own touch gesture handling.
+    if (browser.ipad) {
+        browser.mobile = true;
+    }
+    // =====END HOMELAB IPAD AS MOBILE=====
+
     browser.ps4 = normalizedUA.includes('playstation 4');
     browser.xboxOne = normalizedUA.includes('xbox');
 
