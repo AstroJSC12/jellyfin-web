@@ -1,0 +1,126 @@
+# =====HOMELAB IMAGE BUILD=====
+# Builds the custom Media UI (nginx serving dist/) OFF the NAS, on
+# GitHub-hosted runners, and pushes it to GHCR. The NAS only ever
+# *pulls* this image; it never builds (see HOMELAB_FORK_NOTES.md).
+#
+# Tags pushed (master, and a manual run of the default branch):
+#   ghcr.io/astrojsc12/jellyfin-web-custom:sha-<7 char sha>
+#   ghcr.io/astrojsc12/jellyfin-web-custom:latest
+# Pull requests build the image and do not push.
+#
+# Upstream Jellyfin workflows in this directory are left in place.
+# They must stay disabled on this fork (Actions tab) so enabling
+# Actions for this file does not start them. See the PR that added
+# this workflow.
+# =====END HOMELAB IMAGE BUILD=====
+name: Homelab image (GHCR)
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: homelab-image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/astrojsc12/jellyfin-web-custom
+
+jobs:
+  test:
+    name: Typecheck + unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          # No npm cache: the Actions cache wants `actions: write`, and
+          # this workflow stays on contents: read (plus packages: write
+          # on the image job only).
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:check
+      - run: npm test
+
+  image:
+    name: Build & push linux/amd64 image
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so webpack's `git describe --always` abbreviates
+          # the commit the same way a normal clone (the Mac image) does.
+          # persist-credentials must stay false: the default extraheader
+          # would copy GITHUB_TOKEN into the Docker build context via .git.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags & labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=jellyfin-web-custom
+            org.opencontainers.image.description=Jeff's homelab jellyfin-web fork (Infuse handoff)
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build (and push unless PR)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: homelab/docker/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          # Attestations need id-token: write. The NAS reads the image
+          # config label, not a provenance attestation, so leave them off.
+          provenance: false
+          sbom: false
+
+      - name: Summary
+        if: github.event_name != 'pull_request'
+        run: |
+          short="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          {
+            echo "### Pushed"
+            echo "\`${IMAGE}:sha-${short}\`"
+            echo
+            echo "\`${IMAGE}:latest\` (default branch only)"
+            echo
+            echo "Label \`org.opencontainers.image.revision\`: \`${GITHUB_SHA}\`"
+            echo
+            echo "Served at \`/.buildinfo\`: \`building from ${GITHUB_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

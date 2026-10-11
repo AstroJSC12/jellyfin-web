@@ -15,13 +15,20 @@ on:
 jobs:
   main:
     name: 'Unstable release 🚀⚠️'
+    # =====HOMELAB SKIP UPSTREAM CI=====
+    # This fork publishes ghcr.io/astrojsc12/jellyfin-web-custom from
+    # homelab-image.yml. Do not also run upstream's unstable release.
+    if: ${{ github.repository == 'jellyfin/jellyfin-web' }}
+    # =====END HOMELAB SKIP UPSTREAM CI=====
     uses: ./.github/workflows/__package.yml
     with:
       commit: ${{ github.sha }}
 
   quality_checks:
     name: Quality checks 👌🧪
-    if: ${{ always() && !cancelled() }}
+    # =====HOMELAB SKIP UPSTREAM CI=====
+    if: ${{ github.repository == 'jellyfin/jellyfin-web' && always() && !cancelled() }}
+    # =====END HOMELAB SKIP UPSTREAM CI=====
     uses: ./.github/workflows/__quality_checks.yml
     permissions: {}
     with:
@@ -29,6 +36,9 @@ jobs:
 
   codeql:
     name: GitHub CodeQL 🔬
+    # =====HOMELAB SKIP UPSTREAM CI=====
+    if: ${{ github.repository == 'jellyfin/jellyfin-web' }}
+    # =====END HOMELAB SKIP UPSTREAM CI=====
     uses: ./.github/workflows/__codeql.yml
     permissions:
       actions: read

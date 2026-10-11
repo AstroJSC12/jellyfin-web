@@ -1,8 +1,13 @@
 name: Scheduled tasks 🕑
 
 on:
-  schedule:
-    - cron: '30 1 * * *'
+  # =====HOMELAB SKIP UPSTREAM CI=====
+  # schedule:
+  #   - cron: '30 1 * * *'
+  # Upstream stale-bot. It needs JF_BOT_TOKEN and the job only runs
+  # when the repo name contains "jellyfin/". Leave the cron off here
+  # so enabling Actions does not open a daily run.
+  # =====END HOMELAB SKIP UPSTREAM CI=====
   workflow_dispatch:
 permissions:
   issues: write

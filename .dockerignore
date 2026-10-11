@@ -1,0 +1,14 @@
+# =====HOMELAB IMAGE BUILD=====
+# Keep install/build output out of the context so `COPY . .` does not
+# clobber the npm ci layer. Do NOT ignore .git or any tracked file.
+# webpack stamps `git describe --always --dirty` into the page; a
+# missing tracked file (for example .github/) makes that string end
+# in "-dirty", which the Mac image — built from a real checkout —
+# does not.
+# =====END HOMELAB IMAGE BUILD=====
+node_modules
+dist
+coverage
+web
+.direnv
+.envrc

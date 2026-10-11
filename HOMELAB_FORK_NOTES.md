@@ -17,14 +17,22 @@ stock upstream — same browse, search, settings, library views.
 > on 2026-05-14 OOM-killed the box hard enough that it lost
 > Tailscale, dropped SSH, and needed a physical power-cycle.
 >
-> **Always build on the Mac (M3 Pro, ~80s), then ship the prebuilt
-> image to the NAS.** Exact commands live in
-> `~/Projects/homelab/compose/jellyfin-web-custom/README.md`
-> under "Deploying from the Mac (canonical path)."
+> **Build off the NAS, then have the NAS pull a finished image.**
+> Two ways, same rule:
 >
-> The `Dockerfile` and `docker-compose.yml` still contain a
-> `build:` block for documentation purposes — but it must not be
-> exercised against the NAS Docker daemon. Always use
+> 1. **GitHub Actions** (the usual path). A push to `master` runs
+>    `.github/workflows/homelab-image.yml` on a GitHub-hosted runner
+>    and publishes `ghcr.io/astrojsc12/jellyfin-web-custom`. The NAS
+>    only pulls.
+> 2. **The Mac**, via `scripts/homelab-deploy.sh`, when you need a
+>    build that is not on `master` yet. Still an M-series build,
+>    then ship the image. Write-up:
+>    `~/Projects/homelab/compose/jellyfin-web-custom/README.md`,
+>    section "Deploying from the Mac (canonical path)."
+>
+> The `Dockerfile` and `docker-compose.yml` in the homelab repo
+> still contain a `build:` block for documentation — but it must
+> not be exercised against the NAS Docker daemon. Always use
 > `docker compose up -d --no-build` on the NAS.
 
 Companion docs in the homelab repo (`~/Projects/homelab`):
@@ -428,11 +436,48 @@ so prefer the Tailscale hostname for consistency across
 networks. Same goes for the deployed PWA at
 `http://jeff-nas.taild6c575.ts.net:8097`.
 
+## Image publish (GHCR)
+
+Workflow: `.github/workflows/homelab-image.yml`.
+Image definition: `homelab/docker/Dockerfile`, with
+`homelab/docker/nginx.conf` beside it (same nginx behaviour as
+the compose file in the homelab repo: port 80, SPA fallback,
+long cache on static assets, no-store on `serviceworker.js`).
+
+A push to `master` builds `linux/amd64` and pushes two tags:
+
+- `ghcr.io/astrojsc12/jellyfin-web-custom:sha-<first 7 characters of the commit>`
+- `ghcr.io/astrojsc12/jellyfin-web-custom:latest`
+
+A pull request builds the image and does not push. The workflow
+uses `GITHUB_TOKEN` only.
+
+The container serves `/.buildinfo` as one line of plain text:
+
+```
+building from <full 40-character commit sha>
+```
+
+The image label `org.opencontainers.image.revision` is that same
+full sha. The NAS update script reads the label and curls
+`:8097/.buildinfo`.
+
+GitHub does not pick public vs private for you. After the first
+publish, set that on the package's settings page. A private
+package means the NAS has to `docker login ghcr.io` before it
+can pull; a public package can be pulled with no login.
+
+Upstream's own workflows are still in `.github/workflows/` and
+are not part of this fork's deploy. Leave them disabled in the
+Actions tab. Turning Actions on without doing that will also
+start "Pull Request", "Push & Release", "Workflow Run", and the
+daily "Scheduled tasks" run.
+
 ## Deploying changes
 
-The canonical procedure (Mac-build, ship, NAS run with
-`--no-build`) is wrapped by `scripts/homelab-deploy.sh`. Typical
-iteration is just:
+Pushes to `master` publish the image above. For a one-off build
+from the Mac (a branch, or GitHub is down), the old procedure
+is still `scripts/homelab-deploy.sh`. Typical iteration is just:
 
 ```bash
 ./scripts/homelab-deploy.sh
