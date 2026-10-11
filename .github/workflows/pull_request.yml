@@ -1,7 +1,14 @@
-name: Pull Request
+# =====HOMELAB SKIP UPSTREAM CI=====
+# Display name must not be "Pull Request". workflow_run.yml (the copy
+# on master, until this lands) starts a deploy whenever a workflow with
+# that exact name completes, and that deploy needs secrets this fork
+# does not have. The concurrency group stays "Pull Request-…" so a new
+# push still cancels an in-flight run of this file.
+# =====END HOMELAB SKIP UPSTREAM CI=====
+name: Pull Request (upstream, skipped on this fork)
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: Pull Request-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 on:
@@ -15,14 +22,20 @@ on:
 jobs:
   build:
     name: Build 🏗️
-    if: ${{ always() && !cancelled() }}
+    # =====HOMELAB SKIP UPSTREAM CI=====
+    # This fork builds its own image. Upstream CI expects Jellyfin org
+    # secrets and would fail here. Skip unless the repo is upstream.
+    if: ${{ github.repository == 'jellyfin/jellyfin-web' && always() && !cancelled() }}
+    # =====END HOMELAB SKIP UPSTREAM CI=====
     uses: ./.github/workflows/__package.yml
     with:
       commit: ${{ github.event.pull_request.head.sha }}
 
   quality_checks:
     name: Quality checks 👌🧪
-    if: ${{ always() && !cancelled() }}
+    # =====HOMELAB SKIP UPSTREAM CI=====
+    if: ${{ github.repository == 'jellyfin/jellyfin-web' && always() && !cancelled() }}
+    # =====END HOMELAB SKIP UPSTREAM CI=====
     uses: ./.github/workflows/__quality_checks.yml
     permissions: {}
     with:
@@ -30,7 +43,9 @@ jobs:
 
   codeql:
     name: GitHub CodeQL 🔬
-    if: ${{ always() && !cancelled() }}
+    # =====HOMELAB SKIP UPSTREAM CI=====
+    if: ${{ github.repository == 'jellyfin/jellyfin-web' && always() && !cancelled() }}
+    # =====END HOMELAB SKIP UPSTREAM CI=====
     uses: ./.github/workflows/__codeql.yml
     permissions:
       actions: read
