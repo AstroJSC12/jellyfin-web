@@ -6,10 +6,13 @@
 #   (section "Deploying from the Mac (canonical path)")
 #
 # CRITICAL: the production webpack build (~2–4 GB peak RAM across
-# ~1700 packages) MUST run on the Mac, never the NAS. This script
-# enforces that by building on the Mac with `docker buildx
-# --platform linux/amd64`, then shipping the prebuilt image to
-# the NAS where `docker compose up -d --no-build` just runs it.
+# ~1700 packages) must never run on the NAS. It OOM-killed the box
+# on 2026-05-14. Two off-NAS paths:
+#   - GitHub Actions (.github/workflows/homelab-image.yml) publishes
+#     ghcr.io/astrojsc12/jellyfin-web-custom. The NAS only pulls.
+#   - This script builds on the Mac with `docker buildx
+#     --platform linux/amd64`, then ships that prebuilt image.
+# On the NAS, `docker compose up -d --no-build` only runs the image.
 #
 # Typical iteration:
 #   ./scripts/homelab-deploy.sh
